@@ -7,13 +7,16 @@ export default defineConfig({
   expect: { timeout: 8_000 },
   reporter: 'list',
   use: {
-    baseURL: 'http://127.0.0.1:15689/ebook/',
+    baseURL: 'http://127.0.0.1:15692/ebook/',
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1',
-    url: 'http://127.0.0.1:15689/ebook/',
+    command: 'npx vitepress dev docs --host 127.0.0.1 --port 15692',
+    url: 'http://127.0.0.1:15692/ebook/',
+    env: {
+      VITE_WORKER_URL: 'http://127.0.0.1:15692/mock-worker',
+    },
     reuseExistingServer: true,
     timeout: 60_000,
   },

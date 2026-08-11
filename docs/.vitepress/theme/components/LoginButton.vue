@@ -1,12 +1,21 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useAuth } from '../composables/useAuth'
 
-const { user, loading, error, login, logout, clearError } = useAuth()
+const {
+  user,
+  loading,
+  error,
+  isAuthenticated,
+  login,
+  logout,
+  refreshUser,
+  clearError,
+} = useAuth()
 const showMenu = ref(false)
 const btnRef = ref<HTMLElement | null>(null)
 const menuStyle = ref({ top: '0px', right: '0px' })
-let hideTimer: ReturnType<typeof setTimeout> | null = null
+const avatarFailed = ref(false)
 
 function updateMenuPos() {
   if (!btnRef.value) return
@@ -17,34 +26,27 @@ function updateMenuPos() {
   }
 }
 
-function onEnter() {
+function handleLogout() {
+  closeMenu()
+  logout()
+}
+
+function openMenu() {
   if (!user.value) return
-  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
   showMenu.value = true
   nextTick(updateMenuPos)
 }
 
-function onLeave() {
-  hideTimer = setTimeout(() => { showMenu.value = false }, 150)
-}
-
-function onMenuEnter() {
-  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
-}
-
-function onMenuLeave() {
+function closeMenu(returnFocus = false) {
+  if (!showMenu.value) return
   showMenu.value = false
-}
-
-function handleLogout() {
-  showMenu.value = false
-  logout()
+  if (returnFocus) nextTick(() => btnRef.value?.focus())
 }
 
 function toggleMenu() {
   if (!user.value) return
-  showMenu.value = !showMenu.value
-  if (showMenu.value) nextTick(updateMenuPos)
+  if (showMenu.value) closeMenu()
+  else openMenu()
 }
 
 function onClickOutside(e: MouseEvent) {
@@ -52,13 +54,29 @@ function onClickOutside(e: MouseEvent) {
   if (btnRef.value?.contains(e.target as Node)) return
   const menu = document.querySelector('.login-menu-portal')
   if (menu?.contains(e.target as Node)) return
-  showMenu.value = false
+  closeMenu()
 }
 
-onMounted(() => document.addEventListener('click', onClickOutside, true))
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && showMenu.value) {
+    e.preventDefault()
+    closeMenu(true)
+  }
+}
+
+function onAvatarError() {
+  avatarFailed.value = true
+}
+
+watch(() => user.value?.avatar_url, () => { avatarFailed.value = false })
+
+onMounted(() => {
+  document.addEventListener('click', onClickOutside, true)
+  document.addEventListener('keydown', onKeydown)
+})
 onUnmounted(() => {
   document.removeEventListener('click', onClickOutside, true)
-  if (hideTimer) clearTimeout(hideTimer)
+  document.removeEventListener('keydown', onKeydown)
 })
 </script>
 
@@ -66,12 +84,22 @@ onUnmounted(() => {
   <div class="login-btn-wrapper">
     <span v-if="loading" class="avatar-placeholder" />
     <button
-      v-else-if="!user"
+      v-else-if="!user && !isAuthenticated"
       type="button"
       class="sign-in-btn"
       :disabled="loading"
+      aria-label="登录 GitHub"
+      title="登录 GitHub"
       @click="login"
-    >登录 GitHub</button>
+    ><span class="sign-in-label">登录 GitHub</span><span class="sign-in-compact" aria-hidden="true">GH</span></button>
+    <button
+      v-else-if="!user"
+      type="button"
+      class="sign-in-btn auth-retry-btn"
+      :disabled="loading"
+      :aria-label="loading ? '正在验证 GitHub 会话' : '重试读取 GitHub 账号'"
+      @click="refreshUser"
+    ><span class="auth-retry-label">{{ loading ? '验证中...' : '重试读取账号' }}</span><span class="auth-retry-compact" aria-hidden="true">↻</span></button>
     <button
       v-else
       ref="btnRef"
@@ -80,27 +108,43 @@ onUnmounted(() => {
       aria-haspopup="menu"
       :aria-expanded="showMenu"
       aria-label="打开 GitHub 用户菜单"
-      @mouseenter="onEnter"
-      @mouseleave="onLeave"
       @click="toggleMenu"
     >
-      <img :src="user.avatar_url" :alt="user.login" class="user-avatar" />
+      <img
+        v-if="user.avatar_url && !avatarFailed"
+        :src="user.avatar_url"
+        :alt="user.login"
+        class="user-avatar"
+        loading="lazy"
+        referrerpolicy="no-referrer"
+        @error="onAvatarError"
+      />
+      <span v-else class="user-avatar avatar-fallback" aria-hidden="true">{{ user.login.slice(0, 1).toUpperCase() }}</span>
     </button>
 
     <Teleport to="body">
       <div
         v-if="showMenu && user"
         class="login-menu-portal"
+        role="menu"
+        aria-label="GitHub 用户菜单"
         :style="menuStyle"
-        @mouseenter="onMenuEnter"
-        @mouseleave="onMenuLeave"
       >
         <div class="menu-header">
-          <img :src="user.avatar_url" class="menu-avatar" />
-          <a :href="user.html_url" target="_blank" rel="noopener noreferrer" class="menu-name">{{ user.login }}</a>
+          <img
+            v-if="user.avatar_url && !avatarFailed"
+            :src="user.avatar_url"
+            :alt="user.login"
+            class="menu-avatar"
+            loading="lazy"
+            referrerpolicy="no-referrer"
+            @error="onAvatarError"
+          />
+          <span v-else class="menu-avatar avatar-fallback" aria-hidden="true">{{ user.login.slice(0, 1).toUpperCase() }}</span>
+          <a :href="user.html_url" target="_blank" rel="noopener noreferrer" class="menu-name" role="menuitem">{{ user.login }}</a>
         </div>
         <div class="menu-divider" />
-        <button type="button" class="menu-item danger" @click="handleLogout">退出并撤销授权</button>
+        <button type="button" class="menu-item danger" role="menuitem" @click="handleLogout">退出并撤销授权</button>
       </div>
     </Teleport>
 
@@ -135,10 +179,27 @@ onUnmounted(() => {
   opacity: 0.8;
 }
 
+.avatar-btn:focus-visible,
+.sign-in-btn:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 2px;
+}
+
 .user-avatar {
   width: 32px;
   height: 32px;
   border-radius: 50%;
+  object-fit: cover;
+  background: var(--vp-c-bg-soft);
+}
+
+.avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vp-c-text-2);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .sign-in-btn {
@@ -159,11 +220,29 @@ onUnmounted(() => {
 }
 .sign-in-btn:disabled { opacity: .55; cursor: wait; }
 
+.sign-in-compact,
+.auth-retry-compact { display: none; }
+
 .avatar-placeholder {
   width: 32px;
   height: 32px;
   border-radius: 50%;
   background: var(--vp-c-bg-soft);
+}
+
+@media (max-width: 640px) {
+  .sign-in-btn {
+    width: 32px;
+    height: 30px;
+    padding: 0;
+    font-size: 11px;
+  }
+
+  .sign-in-label,
+  .auth-retry-label { display: none; }
+
+  .sign-in-compact,
+  .auth-retry-compact { display: inline; font-size: 16px; line-height: 1; }
 }
 </style>
 
@@ -190,6 +269,8 @@ onUnmounted(() => {
   width: 24px;
   height: 24px;
   border-radius: 50%;
+  object-fit: cover;
+  background: var(--vp-c-bg-soft);
 }
 
 .login-menu-portal .menu-name {
@@ -245,4 +326,5 @@ onUnmounted(() => {
 .login-menu-portal .menu-item.danger:hover {
   color: var(--vp-c-danger-1, #e5484d);
 }
+
 </style>

@@ -226,6 +226,63 @@ test('360px 移动端抽屉不溢出并保持键盘焦点在对话框内', async
   })).toBe(true)
 })
 
+test('360px 移动端登录控件不挤出导航栏', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 780 })
+  await preparePage(page)
+  await page.goto('chapters/01-introduction')
+
+  await expect(page.locator('.VPNavBar .sign-in-btn')).toBeVisible()
+  await expect(page.locator('.VPNavBarHamburger')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+test('GitHub 用户菜单支持点击、Escape 和键盘焦点恢复', async ({ page }) => {
+  await preparePage(page, true)
+  await page.goto('chapters/01-introduction')
+
+  const avatar = page.locator('.avatar-btn')
+  await avatar.click()
+  await expect(page.locator('.login-menu-portal')).toBeVisible()
+
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.login-menu-portal')).toHaveCount(0)
+  await expect(avatar).toHaveAttribute('aria-expanded', 'false')
+  await expect(avatar).toBeFocused()
+  await expectNoSeriousA11yViolations(page)
+})
+
+test('OAuth 用户信息暂时失败时保留会话并提供重试', async ({ page }) => {
+  await page.addInitScript(() => {
+    sessionStorage.setItem('github-reader::ebook::auth::oauth-state', 'state-ok')
+  })
+  await page.route('http://127.0.0.1:15692/mock-worker/**', async route => {
+    if (route.request().url().includes('/api/auth')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ access_token: 'new-token' }),
+      })
+      return
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ discussion: null, comments: [] }),
+    })
+  })
+  await page.route('https://api.github.com/user', route => route.fulfill({
+    status: 503,
+    contentType: 'application/json',
+    body: '{}',
+  }))
+
+  await page.goto('chapters/01-introduction?code=code-ok&state=state-ok')
+  await expect(page.locator('.auth-retry-btn')).toBeVisible()
+  await expect(page.getByText('GitHub 会话需要验证')).toBeVisible()
+  await expect.poll(() => page.evaluate(() =>
+    sessionStorage.getItem('github-reader::ebook::auth::token'))).toBe('new-token')
+})
+
 test('匿名阅读页和笔记抽屉没有严重无障碍违规', async ({ page }) => {
   await preparePage(page)
   await page.goto('chapters/01-introduction?note=note-1')

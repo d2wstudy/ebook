@@ -55,7 +55,7 @@ onUnmounted(() => {
         <ellipse cx="8" cy="8" rx="3" ry="6.5" />
         <line x1="1.5" y1="8" x2="14.5" y2="8" />
       </svg>
-      <span>{{ languageShort(defaultLanguage) }}</span>
+      <span class="lang-label">{{ languageShort(defaultLanguage) }}</span>
       <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
         <path d="m3 4.5 3 3 3-3" />
       </svg>
@@ -147,7 +147,14 @@ onUnmounted(() => {
 .lang-option small { display: block; margin-top: 2px; color: var(--vp-c-text-2); font-size: 11px; }
 
 @media (max-width: 640px) {
-  .lang-switch { min-width: 62px; padding-inline: 7px; }
+  .lang-switch {
+    width: 72px;
+    min-width: 72px;
+    padding-inline: 6px;
+    gap: 4px;
+    font-size: 12px;
+  }
+  .lang-switch .chevron { display: none; }
   .lang-menu { position: fixed; top: 56px; right: 12px; }
 }
 </style>

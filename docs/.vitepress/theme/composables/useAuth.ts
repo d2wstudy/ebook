@@ -10,6 +10,9 @@ const OAUTH_STATE_KEY = `${STORAGE_PREFIX}::oauth-state`
 const LEGACY_TOKEN_KEY = 'gh-token'
 const LEGACY_USER_KEY = 'gh-user'
 const LEGACY_OAUTH_STATE_KEY = 'gh-oauth-state'
+const AUTH_REQUEST_TIMEOUT_MS = 15_000
+const WORKER_CONFIGURED = isConfiguredWorkerUrl(WORKER_URL)
+const WORKER_CONFIG_ERROR = '缺少有效的 VITE_WORKER_URL，无法完成 GitHub 登录。'
 
 export interface GitHubUser {
   login: string
@@ -114,13 +117,17 @@ export function useAuth() {
     }
 
     if (token.value) {
-      if (!user.value) loading.value = true
-      void fetchUser().finally(() => { loading.value = false })
+      void refreshUser()
     }
   }
 
   async function login() {
     if (!isBrowser) return
+
+    if (!WORKER_CONFIGURED) {
+      error.value = WORKER_CONFIG_ERROR
+      return
+    }
 
     if (!GITHUB_CLIENT_ID) {
       error.value = '缺少 VITE_GITHUB_CLIENT_ID，无法启动 GitHub 登录。'
@@ -149,12 +156,16 @@ export function useAuth() {
     clearSession()
 
     if (!saved) return true
+    if (!WORKER_CONFIGURED) {
+      error.value = '已退出本地会话，但缺少有效的 VITE_WORKER_URL，无法撤销 GitHub 授权。'
+      return false
+    }
     if (!GITHUB_CLIENT_ID) {
       error.value = '已退出本地会话，但缺少 OAuth Client ID，无法撤销 GitHub 授权。'
       return false
     }
 
-    const promise = fetch(`${WORKER_URL}/api/revoke`, {
+    const promise = fetchWithTimeout(`${WORKER_URL}/api/revoke`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ access_token: saved, client_id: GITHUB_CLIENT_ID }),
@@ -175,12 +186,17 @@ export function useAuth() {
   }
 
   async function exchangeCode(code: string) {
+    if (!WORKER_CONFIGURED) {
+      error.value = WORKER_CONFIG_ERROR
+      return
+    }
+
     loading.value = true
     error.value = null
     const redirectUri = window.location.origin + window.location.pathname
 
     try {
-      const resp = await fetch(`${WORKER_URL}/api/auth`, {
+      const resp = await fetchWithTimeout(`${WORKER_URL}/api/auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -200,7 +216,7 @@ export function useAuth() {
       await fetchUser()
     } catch (cause) {
       clearSession()
-      error.value = cause instanceof Error ? cause.message : 'GitHub 登录失败。'
+      error.value = authErrorMessage(cause, 'GitHub 登录失败。')
     } finally {
       loading.value = false
     }
@@ -210,7 +226,7 @@ export function useAuth() {
     if (!token.value) return false
 
     try {
-      const resp = await fetch('https://api.github.com/user', {
+      const resp = await fetchWithTimeout('https://api.github.com/user', {
         headers: { Authorization: `Bearer ${token.value}` },
       })
 
@@ -225,9 +241,20 @@ export function useAuth() {
         ? 'GitHub 登录已失效，请重新登录。'
         : `读取 GitHub 用户信息失败（${resp.status}）。`
       return false
-    } catch {
-      error.value = '当前无法连接 GitHub，请检查网络后重试。'
+    } catch (cause) {
+      error.value = authErrorMessage(cause, '当前无法连接 GitHub，请检查网络后重试。')
       return false
+    }
+  }
+
+  async function refreshUser(): Promise<boolean> {
+    if (!token.value) return false
+    loading.value = true
+    error.value = null
+    try {
+      return await fetchUser()
+    } finally {
+      loading.value = false
     }
   }
 
@@ -249,6 +276,7 @@ export function useAuth() {
     init,
     login,
     logout,
+    refreshUser,
     invalidate,
     clearError,
   }
@@ -272,4 +300,33 @@ function createOAuthState(): string {
   const bytes = new Uint8Array(24)
   crypto.getRandomValues(bytes)
   return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeout = AUTH_REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeout)
+  return fetch(input, { ...init, signal: controller.signal })
+    .finally(() => clearTimeout(timer))
+}
+
+function authErrorMessage(cause: unknown, fallback: string): string {
+  if (cause instanceof Error && cause.name === 'AbortError') {
+    return 'GitHub 请求超时，请稍后重试。'
+  }
+  return cause instanceof Error && cause.message ? cause.message : fallback
+}
+
+function isConfiguredWorkerUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1'
+    return !url.hostname.endsWith('.invalid')
+      && (url.protocol === 'https:' || (local && url.protocol === 'http:'))
+  } catch {
+    return false
+  }
 }
