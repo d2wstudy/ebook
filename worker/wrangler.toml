@@ -1,15 +1,15 @@
-name = "reader-template-auth"
+name = "ebook-reader-worker"
 main = "index.js"
 compatibility_date = "2024-01-01"
 workers_dev = true
 preview_urls = false
 
 [vars]
-REPO_OWNER = "example"
-REPO_NAME = "reader-template"
-DOCUMENT_PATH_PREFIX = "/reader-template/"
+REPO_OWNER = "d2wstudy"
+REPO_NAME = "ebook"
+DOCUMENT_PATH_PREFIX = "/ebook/"
 DISCUSSION_CATEGORIES = "Notes,Announcements,General"
-ALLOWED_ORIGINS = "https://example.github.io,http://localhost:15689,http://127.0.0.1:15689"
+ALLOWED_ORIGINS = "https://d2wstudy.github.io,http://localhost:15689,http://127.0.0.1:15689"
 
 [observability]
 [observability.logs]

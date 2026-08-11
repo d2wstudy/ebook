@@ -15,10 +15,10 @@ export interface BookConfig {
 
 /** Public build-time settings for this book. Secrets stay in environment variables. */
 export const bookConfig = {
-  id: 'reader-template',
+  id: 'ebook',
   title: '通用电子书模板',
   description: '支持自动发现语言目录的电子书阅读模板',
-  base: '/reader-template/',
+  base: '/ebook/',
   contentDir: 'content',
   defaultLanguage: 'zh-CN',
   languageNames: {
@@ -26,8 +26,8 @@ export const bookConfig = {
     'zh-CN': '简体中文',
   },
   github: {
-    owner: 'example',
-    repo: 'reader-template',
+    owner: 'd2wstudy',
+    repo: 'ebook',
     workerUrl: 'https://example.invalid/reader-worker',
   },
 } satisfies BookConfig

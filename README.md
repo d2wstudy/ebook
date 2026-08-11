@@ -13,7 +13,7 @@ npm ci
 npm run dev
 ```
 
-开发地址：`http://localhost:15689/reader-template/`
+开发地址：`http://localhost:15689/ebook/`
 
 常用命令：
 
@@ -109,7 +109,78 @@ export const bookConfig = {
 
 ## GitHub 与 Worker
 
-复制环境变量示例并填写 OAuth Client ID：
+Worker 是 GitHub OAuth、Discussion 匿名读取和缓存失效的服务端代理。每本书默认部署一个 Cloudflare Worker，浏览器使用公开的 Worker URL 调用它，GitHub Client Secret 和 PAT 只保存在 Cloudflare 中。
+
+### 1. 准备 GitHub 仓库
+
+在目标仓库的 `Settings > General > Features` 中启用 Discussions，并确认存在以下 Discussion 分类：
+
+- `Notes`：划词标注使用；默认仓库通常没有这个分类，需要手动创建。
+- `Announcements`：公告读取使用。
+- `General`：章节评论使用。
+
+如需让未登录用户也能读取讨论，创建一个只授权目标仓库的 fine-grained personal access token，并授予 `Discussions: Read-only`。这个 token 后续保存为 Worker 的 `GITHUB_PAT` secret，不能写入代码或提交到 Git。
+
+### 2. 配置 Worker 部署变量
+
+在 `worker/wrangler.toml` 中配置当前书籍。以本仓库为例：
+
+```toml
+name = "ebook-reader-worker"
+main = "index.js"
+compatibility_date = "2024-01-01"
+workers_dev = true
+
+[vars]
+REPO_OWNER = "d2wstudy"
+REPO_NAME = "ebook"
+DOCUMENT_PATH_PREFIX = "/ebook/"
+DISCUSSION_CATEGORIES = "Notes,Announcements,General"
+ALLOWED_ORIGINS = "https://d2wstudy.github.io,http://localhost:15689,http://127.0.0.1:15689"
+```
+
+`DOCUMENT_PATH_PREFIX` 必须与 `book.config.ts` 的 `base` 一致。`ALLOWED_ORIGINS` 只填写 Origin，不包含 `/ebook/` 路径。
+
+### 3. 部署并获得 Worker URL
+
+需要一个 Cloudflare 账号。首次部署时 Wrangler 会打开浏览器完成登录授权：
+
+```powershell
+cd worker
+npx wrangler login
+npx wrangler deploy
+```
+
+部署成功后终端会输出类似地址：
+
+```text
+https://ebook-reader-worker.<your-workers-subdomain>.workers.dev
+```
+
+这就是 Worker URL。也可以进入 Cloudflare Dashboard，在 `Workers & Pages > ebook-reader-worker > Settings > Domains & Routes` 中查看。访问 Worker 根路径返回 `404 {"error":"Not found"}` 是正常的，因为 Worker 只暴露 `/api/*` 接口。
+
+首次部署完成后，把匿名读取 Discussion 使用的 PAT 保存为 Worker secret，并再次部署：
+
+```powershell
+npx wrangler secret put GITHUB_PAT
+npx wrangler deploy
+```
+
+### 4. 配置前端 Worker URL
+
+将部署得到的地址写入 `book.config.ts`：
+
+```ts
+github: {
+  owner: 'd2wstudy',
+  repo: 'ebook',
+  workerUrl: 'https://ebook-reader-worker.<your-workers-subdomain>.workers.dev',
+},
+```
+
+Worker URL 是公开配置，不是 secret。也可以通过 `VITE_WORKER_URL` 覆盖它。本仓库的 GitHub Pages 工作流会读取仓库变量 `VITE_WORKER_URL`，因此可以在 `Settings > Secrets and variables > Actions > Variables` 中设置，而不修改文件。
+
+本地开发可以复制环境变量示例：
 
 ```powershell
 Copy-Item docs/.env.example docs/.env.development.local
@@ -122,15 +193,49 @@ VITE_GITHUB_REPO_OWNER=your-account
 VITE_GITHUB_REPO_NAME=my-book
 ```
 
-Worker 的仓库、页面路径前缀、Discussion 分类和允许 Origin 必须通过部署变量固定，不能由浏览器请求动态选择仓库。修改 `worker/wrangler.toml` 后单独部署：
+### 5. 配置 GitHub OAuth（登录和写操作）
 
-```bash
+只阅读电子书不需要 OAuth。若要支持登录、发表评论、创建标注和 Reaction，在 GitHub 的 `Settings > Developer settings > OAuth Apps` 中创建 OAuth App。本仓库填写：
+
+```text
+Homepage URL: https://d2wstudy.github.io/ebook/
+Authorization callback URL: https://d2wstudy.github.io/ebook/
+```
+
+将 OAuth 凭据保存到 Worker：
+
+```powershell
 cd worker
-npx wrangler dev
+npx wrangler secret put GITHUB_CLIENT_ID
+npx wrangler secret put GITHUB_CLIENT_SECRET
 npx wrangler deploy
 ```
 
-第一版仍采用“每本书一个 Worker”的单租户部署方式。这样可以保持仓库和缓存信任边界清晰，后续有多本书需求时再考虑多租户服务。
+`GITHUB_CLIENT_SECRET` 只能存在于 Worker secrets。`GITHUB_CLIENT_ID` 本身是公开值，前端构建也需要它：在 GitHub 仓库 `Settings > Secrets and variables > Actions > Variables` 中添加 `VITE_GITHUB_CLIENT_ID`。当前 Pages 工作流会在构建时自动读取该变量。本地开发则把它写入 `docs/.env.development.local`。
+
+### 6. 验证 Worker
+
+先验证 CORS 预检。PowerShell 中应使用 `curl.exe`，避免调用 `Invoke-WebRequest` 别名：
+
+```powershell
+curl.exe -i -X OPTIONS "https://ebook-reader-worker.<your-workers-subdomain>.workers.dev/api/discussions" `
+  -H "Origin: https://d2wstudy.github.io" `
+  -H "Access-Control-Request-Method: GET"
+```
+
+正常结果为 `204`，并包含：
+
+```text
+Access-Control-Allow-Origin: https://d2wstudy.github.io
+```
+
+再验证 Discussion 读取接口：
+
+```powershell
+curl.exe "https://ebook-reader-worker.<your-workers-subdomain>.workers.dev/api/discussions?path=%2Febook%2Fchapters%2F01-introduction.html&category=General"
+```
+
+Worker 的仓库、页面路径前缀、Discussion 分类和允许 Origin 由部署变量固定，不能由浏览器请求动态选择仓库。修改 `worker/wrangler.toml` 或 Worker secrets 后需要重新执行 `npx wrangler deploy`。
 
 ## 目录结构
 

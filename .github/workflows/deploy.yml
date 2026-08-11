@@ -27,6 +27,9 @@ jobs:
 
       - run: npm ci
       - run: npm run build
+        env:
+          VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
+          VITE_WORKER_URL: ${{ vars.VITE_WORKER_URL }}
 
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -7,13 +7,13 @@ export default defineConfig({
   expect: { timeout: 8_000 },
   reporter: 'list',
   use: {
-    baseURL: 'http://127.0.0.1:15689/reader-template/',
+    baseURL: 'http://127.0.0.1:15689/ebook/',
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
   },
   webServer: {
     command: 'npm run dev -- --host 127.0.0.1',
-    url: 'http://127.0.0.1:15689/reader-template/',
+    url: 'http://127.0.0.1:15689/ebook/',
     reuseExistingServer: true,
     timeout: 60_000,
   },

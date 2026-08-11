@@ -302,7 +302,7 @@ test('新划词笔记以可读 schema v3 正文提交但不写入真实 GitHub',
   expect(submittedBody).toContain('> 这是通用电子书模板')
   expect(decodeAnnotationBody(submittedBody)).toMatchObject({
     schemaVersion: 3,
-    documentId: '/reader-template/chapters/01-introduction.html',
+    documentId: '/ebook/chapters/01-introduction.html',
     note: '一条 **v3** 笔记',
     anchor: {
       selectedText: '这是通用电子书模板',
