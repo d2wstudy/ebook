@@ -11,6 +11,7 @@ docs/.vitepress/dist
 .vitepress-dev*.log
 docs/.env.local
 docs/.env.*.local
+.setup/
 
 # OS
 .DS_Store

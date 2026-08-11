@@ -10,11 +10,16 @@
     "dev": "vitepress dev docs --port 15689",
     "build": "vitepress build docs",
     "preview": "vitepress preview docs",
+    "setup": "node scripts/setup.mjs",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "setup:doctor": "node scripts/setup.mjs --doctor",
+    "setup:rollback": "node scripts/setup.mjs --rollback",
+    "setup:cleanup": "node scripts/setup.mjs --cleanup",
     "check:worker": "node --check worker/index.js",
-    "check": "npm run typecheck && npm run test && npm run check:worker && npm run build"
+    "check:setup": "node --check scripts/setup.mjs",
+    "check": "npm run typecheck && npm run test && npm run check:worker && npm run check:setup && npm run build"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",

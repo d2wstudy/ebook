@@ -19,6 +19,7 @@ npm run dev
 
 ```bash
 npm run dev           # 启动开发服务器
+npm run setup         # 交互式配置 Cloudflare Worker、GitHub OAuth 和 Pages 变量
 npm run build         # 构建静态站点
 npm run preview       # 预览生产构建
 npm run typecheck     # TypeScript / Vue 类型检查
@@ -110,6 +111,45 @@ export const bookConfig = {
 ## GitHub 与 Worker
 
 Worker 是 GitHub OAuth、Discussion 匿名读取和缓存失效的服务端代理。每本书默认部署一个 Cloudflare Worker，浏览器使用公开的 Worker URL 调用它，GitHub Client Secret 和 PAT 只保存在 Cloudflare 中。
+
+### 自动配置（推荐）
+
+首次配置可以直接执行：
+
+```powershell
+npm run setup
+```
+
+向导会从当前 Git remote 推导 GitHub owner 和 repository，按回车即可使用默认值。它会依次：
+
+1. 检查 Cloudflare 登录状态，必要时打开浏览器完成授权。
+2. 更新 `book.config.ts` 和 `worker/wrangler.toml`。
+3. 部署 Worker，并自动解析 `workers.dev` URL。
+4. 通过 Wrangler 交互式保存 `GITHUB_PAT`、OAuth Client ID 和 Client Secret。
+5. 写入本地 `docs/.env.development.local`，并同步 GitHub Actions Variables。
+6. 验证 Worker CORS、Discussion 接口和本地构建。
+7. 最后询问是否提交并推送配置。
+
+脚本不会把 PAT 或 OAuth Client Secret 写入文件。状态文件只记录阶段是否完成，不记录 Secret 内容，并保存在被 Git 忽略的 `.setup/` 目录中。中途失败后再次执行 `npm run setup` 会从未完成阶段继续；如果要修改已完成配置或轮换 Secret，执行：
+
+```powershell
+npm run setup -- --reconfigure
+```
+
+GitHub OAuth App 仍需在打开的 GitHub 页面中创建，并将向导显示的 callback URL 填入 OAuth App；Client ID 可以粘贴回向导，之后由脚本自动完成其余配置。
+
+管理员常用命令：
+
+```powershell
+npm run setup -- --plan       # 只查看变更计划，不写文件、不部署
+npm run setup:doctor          # 检查配置、登录状态、Actions Variables 和 Worker CORS
+npm run setup:rollback        # 恢复最近一次本地配置备份，并可重新部署
+npm run setup:cleanup         # 显式删除当前状态对应的 Worker 和 Actions Variables
+```
+
+`rollback` 不会自动恢复旧 Secret；`cleanup` 不会自动撤销 PAT 或 OAuth 凭证，需要在 GitHub/Cloudflare 中单独处理。当前 Pages 工作流要求存在 `VITE_WORKER_URL`，发布到 GitHub Pages 时不要跳过 Actions Variables 同步。
+
+运行向导前请确保已安装 GitHub CLI（`gh`）。Cloudflare Wrangler 会通过 `npx` 自动获取，不需要全局安装。
 
 ### 1. 准备 GitHub 仓库
 
