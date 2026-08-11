@@ -1,0 +1,40 @@
+{
+  "name": "ebook-reader-template",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "vitepress dev docs --port 15689",
+    "build": "vitepress build docs",
+    "preview": "vitepress preview docs",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "check:worker": "node --check worker/index.js",
+    "check": "npm run typecheck && npm run test && npm run check:worker && npm run build"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.62.1",
+    "@types/markdown-it-container": "^4.0.0",
+    "happy-dom": "^20.11.1",
+    "markdown-it-container": "^4.0.0",
+    "markdown-it-mathjax3": "^4.3.2",
+    "yaml": "^2.8.1",
+    "typescript": "^5.9.3",
+    "vitepress": "^1.6.3",
+    "vitest": "^4.1.10",
+    "vue": "^3.5.13",
+    "vue-tsc": "^3.3.9"
+  },
+  "dependencies": {
+    "@github-reader/core": "file:packages/core",
+    "@github-reader/github": "file:packages/github",
+    "@github-reader/vitepress": "file:packages/vitepress",
+    "dompurify": "^3.4.13",
+    "marked": "^17.0.6"
+  }
+}

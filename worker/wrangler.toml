@@ -1,0 +1,17 @@
+name = "reader-template-auth"
+main = "index.js"
+compatibility_date = "2024-01-01"
+workers_dev = true
+preview_urls = false
+
+[vars]
+REPO_OWNER = "example"
+REPO_NAME = "reader-template"
+DOCUMENT_PATH_PREFIX = "/reader-template/"
+DISCUSSION_CATEGORIES = "Notes,Announcements,General"
+ALLOWED_ORIGINS = "https://example.github.io,http://localhost:15689,http://127.0.0.1:15689"
+
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = true

@@ -1,0 +1,25 @@
+_archive/
+node_modules/
+playwright-report/
+test-results/
+blob-report/
+
+# VitePress
+docs/.vitepress/cache
+docs/.vitepress/.temp
+docs/.vitepress/dist
+.vitepress-dev*.log
+docs/.env.local
+docs/.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.claude/
+.vscode/
+.idea/
+*.swp
+*.swo

@@ -1,0 +1,91 @@
+/* ===== Localized page content ===== */
+
+.reader-language {
+  line-height: 1.8;
+}
+
+.reader-language [data-reader-block] {
+  scroll-margin-top: 88px;
+}
+
+.author-notes {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--vp-c-brand-1);
+  border-radius: 0 8px 8px 0;
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-text-2);
+  font-size: 13px;
+}
+
+/* ===== Reader notes ===== */
+
+.reader-anno {
+  position: relative;
+  padding: 1px 0;
+  border-bottom: 2px solid color-mix(in srgb, var(--vp-c-warning-1) 72%, transparent);
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--vp-c-warning-1) 18%, transparent) 0 62%,
+    transparent 62%
+  );
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.reader-anno:hover,
+.reader-anno:focus-visible {
+  outline: none;
+  border-bottom-color: var(--vp-c-warning-1);
+  background-color: color-mix(in srgb, var(--vp-c-warning-1) 20%, transparent);
+}
+
+.reader-anno-overlap {
+  border-bottom-style: double;
+  background-color: color-mix(in srgb, var(--vp-c-warning-1) 12%, transparent);
+}
+
+.reader-anno-overlap:hover {
+  background-color: color-mix(in srgb, var(--vp-c-warning-1) 26%, transparent);
+}
+
+.anno-inline-bubble {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  min-width: 19px;
+  height: 18px;
+  margin-left: 3px;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--vp-c-warning-1) 58%, transparent);
+  border-radius: 9px 9px 9px 3px;
+  background: var(--vp-c-bg);
+  vertical-align: middle;
+  text-decoration: none;
+  pointer-events: none;
+  user-select: none;
+}
+
+.anno-inline-bubble .anno-count {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--vp-c-warning-1);
+  line-height: 1;
+}
+
+.reader-language ::selection {
+  background: color-mix(in srgb, var(--vp-c-brand-1) 28%, transparent);
+}
+
+/* ===== Nav bar extras ===== */
+
+.VPNavBarExtra,
+.VPNavBar .content-body {
+  gap: 8px;
+}
+
+/* ===== Responsive ===== */
+
+@media (max-width: 768px) {
+}

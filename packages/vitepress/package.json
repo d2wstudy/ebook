@@ -1,0 +1,12 @@
+{
+  "name": "@github-reader/vitepress",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@github-reader/core": "file:../core"
+  }
+}
