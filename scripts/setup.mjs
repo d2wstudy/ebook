@@ -281,7 +281,7 @@ function githubGraphqlJson(query, variables = {}, jq = '.') {
 
 function requiredDiscussionCategories() {
   const config = readFileSync(wranglerConfigPath, 'utf8')
-  return readTomlProperty(config, 'DISCUSSION_CATEGORIES', 'Notes,Announcements,General')
+  return readTomlProperty(config, 'DISCUSSION_CATEGORIES', 'Ideas,Announcements,General')
     .split(',')
     .map((name) => name.trim())
     .filter(Boolean)

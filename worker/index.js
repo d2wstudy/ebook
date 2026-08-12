@@ -17,7 +17,7 @@ const MAX_COMMENT_PAGES = 10
 const DEFAULT_REPO_OWNER = 'example'
 const DEFAULT_REPO_NAME = 'reader-template'
 const DEFAULT_DOCUMENT_PATH_PREFIX = '/reader-template/'
-const DEFAULT_DISCUSSION_CATEGORIES = ['Notes', 'Announcements', 'General']
+const DEFAULT_DISCUSSION_CATEGORIES = ['Ideas', 'Announcements', 'General']
 const ALLOWED_REACTIONS = new Set([
   'THUMBS_UP',
   'THUMBS_DOWN',

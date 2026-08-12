@@ -124,7 +124,7 @@ npm run setup
 
 1. 检查 Cloudflare 登录状态，必要时打开浏览器完成授权。
 2. 检查 GitHub admin 权限，并自动启用 Discussions 和 Workflow 类型 Pages。
-3. 检查 `Notes`、`Announcements`、`General` 分类；缺少分类时打开设置页，等待管理员创建后继续。
+3. 检查 `Ideas`、`Announcements`、`General` 分类；GitHub 默认会创建这些分类，缺失时才打开设置页等待管理员补充。
 4. 更新 `book.config.ts` 和 `worker/wrangler.toml`。
 5. 部署 Worker，并自动解析 `workers.dev` URL。
 6. 通过 Wrangler 交互式保存 `GITHUB_PAT`、OAuth Client ID 和 Client Secret。
@@ -157,7 +157,7 @@ npm run setup:cleanup         # 显式删除当前状态对应的 Worker 和 Act
 
 自动向导会通过 GitHub API 启用 Discussions，并检查 Pages 是否为 Workflow 模式。手动配置时可在目标仓库的 `Settings > General > Features` 中启用 Discussions。以下分类由 Worker 使用：
 
-- `Notes`：划词标注使用；默认仓库通常没有这个分类，需要手动创建。
+- `Ideas`：划词标注使用；GitHub 启用 Discussions 时默认创建。
 - `Announcements`：公告读取使用。
 - `General`：章节评论使用。
 
@@ -177,7 +177,7 @@ workers_dev = true
 REPO_OWNER = "d2wstudy"
 REPO_NAME = "ebook"
 DOCUMENT_PATH_PREFIX = "/ebook/"
-DISCUSSION_CATEGORIES = "Notes,Announcements,General"
+DISCUSSION_CATEGORIES = "Ideas,Announcements,General"
 ALLOWED_ORIGINS = "https://d2wstudy.github.io,http://localhost:15689,http://127.0.0.1:15689"
 ```
 

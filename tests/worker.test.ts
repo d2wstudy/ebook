@@ -13,12 +13,12 @@ describe('Worker request validation', () => {
   it('accepts canonical project pages and rejects unrelated paths', () => {
     expect(validateDiscussionParams(workerUrl({
       path: '/reader-template/chapters/01-introduction.html',
-      category: 'Notes',
+      category: 'Ideas',
     })).error).toBeUndefined()
 
     expect(validateDiscussionParams(workerUrl({
       path: '/another-project/page.html',
-      category: 'Notes',
+      category: 'Ideas',
     })).error).toBe('Invalid path')
   })
 

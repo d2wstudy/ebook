@@ -27,7 +27,7 @@ export const readerConfig = defineReaderConfig({
     oauthScope: 'public_repo',
   },
   discussions: {
-    annotationCategory: 'Notes',
+    annotationCategory: 'Ideas',
     commentReadCategories: ['Announcements', 'General'] as const,
     commentCreateCategory: 'General',
     annotationBody(documentId: string) {

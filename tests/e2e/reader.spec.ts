@@ -7,7 +7,7 @@ const notesDiscussion = {
     id: 'discussion-notes',
     url: 'https://github.com/example/reader-template/discussions/2',
     number: 2,
-    category: 'Notes',
+    category: 'Ideas',
   },
   comments: [
     {
@@ -79,7 +79,7 @@ async function preparePage(page: Page, authenticated = false) {
   await page.route('**/api/discussions?*', async route => {
     const url = new URL(route.request().url())
     const category = url.searchParams.get('category')
-    if (category === 'Notes') {
+    if (category === 'Ideas') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(notesDiscussion) })
       return
     }
