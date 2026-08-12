@@ -265,6 +265,20 @@ function githubApiJson(owner, repo, endpoint, extraArgs = []) {
   }
 }
 
+function githubGraphqlJson(query, variables = {}, jq = '.') {
+  const args = ['api', 'graphql', '-f', `query=${query}`]
+  for (const [name, value] of Object.entries(variables)) {
+    args.push('-F', `${name}=${value}`)
+  }
+  args.push('--jq', jq)
+  const result = commandResult('gh', args, { capture: true })
+  try {
+    return JSON.parse(result.output.trim())
+  } catch (error) {
+    throw new Error(`GitHub GraphQL 返回了无法解析的结果：${error.message}`)
+  }
+}
+
 function requiredDiscussionCategories() {
   const config = readFileSync(wranglerConfigPath, 'utf8')
   return readTomlProperty(config, 'DISCUSSION_CATEGORIES', 'Notes,Announcements,General')
@@ -274,10 +288,9 @@ function requiredDiscussionCategories() {
 }
 
 function readDiscussionCategories(owner, repo) {
-  return githubApiJson(owner, repo, `repos/${owner}/${repo}/discussions/categories`, [
-    '--jq',
-    '[.[].name]',
-  ])
+  // GitHub 没有可用的 REST 分类列表接口，使用 Repository GraphQL 字段读取。
+  const query = 'query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { discussionCategories(first: 100) { nodes { name } } } }'
+  return githubGraphqlJson(query, { owner, repo }, '[.data.repository.discussionCategories.nodes[].name]')
 }
 
 async function ensureGitHubRepository(state) {
