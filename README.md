@@ -132,10 +132,16 @@ npm run setup
 8. 验证 Worker CORS、Discussion 接口和本地构建。
 9. 最后询问是否提交并推送配置。
 
-脚本不会把 PAT 或 OAuth Client Secret 写入文件。状态文件只记录阶段是否完成，不记录 Secret 内容，并保存在被 Git 忽略的 `.setup/` 目录中。中途失败后再次执行 `npm run setup` 会从未完成阶段继续；如果要修改已完成配置或轮换 Secret，执行：
+脚本不会把 PAT 或 OAuth Client Secret 写入文件。状态文件只记录阶段是否完成，不记录 Secret 内容，并保存在被 Git 忽略的 `.setup/` 目录中。中途失败后再次执行 `npm run setup` 会从未完成阶段继续；Worker 最后验证遇到网络超时会自动重试一次，仍失败时不会重复部署或写入 Secret。确认本机可以访问 `workers.dev` 后再次执行即可。如果要修改已完成配置或轮换 Secret，执行：
 
 ```powershell
 npm run setup -- --reconfigure
+```
+
+如果本机网络无法访问 `workers.dev`，前面的配置和部署仍可能已经完成。此时可以使用下面的选项只跳过最后的线上连通性验证；它不会跳过本地配置检查、构建、Secret 或 Actions Variables 配置，之后可用 `npm run setup:doctor` 重试线上检查：
+
+```powershell
+npm run setup -- --skip-verification
 ```
 
 GitHub OAuth App 仍需在打开的 GitHub 页面中创建，并将向导显示的 callback URL 填入 OAuth App；GitHub 没有公开的 OAuth App 创建 API。Client ID 可以粘贴回向导，之后由脚本自动完成其余配置。GitHub Discussion 分类同样需要在缺失时由管理员在网页中创建，向导会自动重新检查。

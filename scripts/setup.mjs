@@ -420,6 +420,32 @@ async function confirmDirtyWorktree() {
   }
 }
 
+function describeFetchError(error) {
+  const cause = error?.cause
+  const code = cause?.code ? `，${cause.code}` : ''
+  const message = cause?.message || error?.message || String(error)
+  return `${message}${code}`
+}
+
+async function fetchForVerification(url, options, label) {
+  let lastError
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      return await fetch(url, {
+        ...options,
+        signal: AbortSignal.timeout(10_000),
+      })
+    } catch (error) {
+      lastError = error
+      if (attempt < 2) {
+        console.log(`\n${label}暂时失败，1 秒后重试（${describeFetchError(error)}）。`)
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      }
+    }
+  }
+  throw new Error(`${label}失败：${url}\n${describeFetchError(lastError)}。请确认网络可以访问 workers.dev，然后重新执行 npm run setup。`)
+}
+
 function createBackup(previous, target) {
   mkdirSync(backupDir, { recursive: true })
   const backupPath = join(backupDir, `${Date.now()}`)
@@ -510,9 +536,9 @@ async function verifyWorker(state) {
       Origin: origin,
       'Access-Control-Request-Method': 'GET',
     },
-    signal: AbortSignal.timeout(15_000),
   }
-  const preflight = await fetch(`${workerUrl}/api/discussions`, { method: 'OPTIONS', ...options })
+  const preflightUrl = `${workerUrl}/api/discussions`
+  const preflight = await fetchForVerification(preflightUrl, { method: 'OPTIONS', ...options }, 'Worker CORS 预检')
   if (preflight.status !== 204 || preflight.headers.get('Access-Control-Allow-Origin') !== origin) {
     throw new Error(`Worker CORS 验证失败（${preflight.status}）。`)
   }
@@ -520,10 +546,10 @@ async function verifyWorker(state) {
     path: `${state.target.base}index.html`,
     category: 'General',
   })
-  const response = await fetch(`${workerUrl}/api/discussions?${params}`, {
+  const discussionUrl = `${workerUrl}/api/discussions?${params}`
+  const response = await fetchForVerification(discussionUrl, {
     headers: { Origin: origin },
-    signal: AbortSignal.timeout(15_000),
-  })
+  }, 'Worker Discussion 接口')
   if (!response.ok) throw new Error(`Worker Discussion 接口验证失败（${response.status}）。`)
 }
 
@@ -541,7 +567,7 @@ function verifyLocalConfig(state) {
   if (mismatches.length) throw new Error(`本地配置不一致：${mismatches.map(([key]) => key).join(', ')}`)
 }
 
-async function applySetup(state, options) {
+async function applySetup(state, options, runtime = {}) {
   ensureCloudflareLogin(state)
   ensureGitHubLogin(state)
   await ensureGitHubRepository(state)
@@ -605,7 +631,11 @@ async function applySetup(state, options) {
 
   if (!state.completed.verification) {
     verifyLocalConfig(state)
-    await verifyWorker(state)
+    if (runtime.skipVerification) {
+      console.log('\n已按要求跳过 Worker 线上连通性验证。配置完成后请运行 npm run setup:doctor 补充检查。')
+    } else {
+      await verifyWorker(state)
+    }
     commandResult('npm', ['run', 'build'])
     saveCompletion(state, 'verification')
   }
@@ -787,7 +817,7 @@ async function setup() {
   }
 
   try {
-    await applySetup(state, state.options)
+    await applySetup(state, state.options, { skipVerification: args.has('--skip-verification') })
     console.log('\n配置、远端同步和验证全部完成。')
     if (state.options.pushChanges && gitFilesChanged(['book.config.ts', 'worker/wrangler.toml'])) {
       commandResult('git', ['add', '--', 'book.config.ts', 'worker/wrangler.toml'])
@@ -819,6 +849,7 @@ function showHelp() {
   npm run setup                         首次配置或继续未完成配置
   npm run setup -- --plan               只查看变更计划，不修改远端或本地文件
   npm run setup -- --reconfigure        重新输入并覆盖配置，可用于纠错或轮换 Secret
+  npm run setup -- --skip-verification  网络受限时跳过最后的 Worker 线上验证
   npm run setup:doctor                  检查本地配置、登录状态和 Worker CORS
   npm run setup:rollback                恢复最近一次本地配置备份并可重新部署
   npm run setup:cleanup                 显式删除当前状态对应的 Worker 和变量
