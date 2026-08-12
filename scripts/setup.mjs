@@ -26,6 +26,56 @@ const statePath = join(setupDir, 'state.json')
 const backupDir = join(setupDir, 'backups')
 const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx'
 const args = new Set(process.argv.slice(2))
+
+function readWindowsProxy() {
+  if (process.platform !== 'win32' || process.env.HTTP_PROXY || process.env.HTTPS_PROXY || process.env.ALL_PROXY) return ''
+  const enabled = spawnSync('reg.exe', [
+    'query',
+    'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
+    '/v',
+    'ProxyEnable',
+  ], { encoding: 'utf8' })
+  if (enabled.status !== 0 || !/0x1|\b1\b/.test(enabled.stdout || '')) return ''
+  const configured = spawnSync('reg.exe', [
+    'query',
+    'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
+    '/v',
+    'ProxyServer',
+  ], { encoding: 'utf8' })
+  const match = (configured.stdout || '').match(/ProxyServer\s+REG_SZ\s+([^\r\n]+)/i)
+  if (!match?.[1]) return ''
+  const configuredProxy = match[1].trim()
+  const proxy = configuredProxy.includes(';')
+    ? configuredProxy.split(';')
+      .map((entry) => entry.trim())
+      .find((entry) => /^(https?|http)=/i.test(entry))
+      ?.replace(/^[^=]+=\s*/i, '')
+    : configuredProxy
+  if (!proxy) return ''
+  return /^https?:\/\//i.test(proxy) ? proxy : `http://${proxy}`
+}
+
+function restartWithWindowsProxy() {
+  if (process.env.EBOOK_SETUP_PROXY_BOOTSTRAPPED) return
+  const proxyUrl = readWindowsProxy()
+  if (!proxyUrl) return
+  console.log(`已读取 Windows 系统代理：${proxyUrl}`)
+  const result = spawnSync(process.execPath, process.argv.slice(1), {
+    cwd: rootDir,
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      HTTP_PROXY: proxyUrl,
+      HTTPS_PROXY: proxyUrl,
+      NODE_USE_ENV_PROXY: '1',
+      EBOOK_SETUP_PROXY_BOOTSTRAPPED: '1',
+    },
+  })
+  if (result.error) throw new Error(`无法通过系统代理重新启动配置工具：${result.error.message}`)
+  process.exit(result.status ?? 1)
+}
+
+restartWithWindowsProxy()
 const rl = createInterface({ input: process.stdin, output: process.stdout })
 
 const COMPLETION_KEYS = [
@@ -713,11 +763,11 @@ async function doctor() {
   if (config.workerUrl && !config.workerUrl.includes('.invalid')) {
     try {
       const origin = config.pagesOrigin || `https://${config.owner}.github.io`
-      const response = await fetch(`${config.workerUrl.replace(/\/+$/, '')}/api/discussions`, {
+      const workerUrl = `${config.workerUrl.replace(/\/+$/, '')}/api/discussions`
+      const response = await fetchForVerification(workerUrl, {
         method: 'OPTIONS',
         headers: { Origin: origin, 'Access-Control-Request-Method': 'GET' },
-        signal: AbortSignal.timeout(10_000),
-      })
+      }, 'Worker CORS 预检')
       if (response.status !== 204) issues.push(`Worker CORS 预检返回 ${response.status}`)
       else console.log('Worker CORS：正常')
     } catch (error) {

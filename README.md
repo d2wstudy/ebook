@@ -157,7 +157,7 @@ npm run setup:cleanup         # 显式删除当前状态对应的 Worker 和 Act
 
 `rollback` 不会自动恢复旧 Secret；`cleanup` 不会自动撤销 PAT 或 OAuth 凭证，需要在 GitHub/Cloudflare 中单独处理。当前 Pages 工作流要求存在 `VITE_WORKER_URL`，发布到 GitHub Pages 时不要跳过 Actions Variables 同步。启用 Discussions 和 Pages 需要仓库 admin 权限。
 
-运行向导前请确保已安装 GitHub CLI（`gh`）。Cloudflare Wrangler 会通过 `npx` 自动获取，不需要全局安装。
+运行向导前请确保已安装 GitHub CLI（`gh`）。Cloudflare Wrangler 会通过 `npx` 自动获取，不需要全局安装。Windows 如果启用了系统代理，向导会在未设置 `HTTP_PROXY`/`HTTPS_PROXY` 时自动读取代理地址；也可以手动设置这两个环境变量覆盖自动检测。
 
 ### 1. 准备 GitHub 仓库
 
