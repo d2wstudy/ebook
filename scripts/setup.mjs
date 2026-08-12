@@ -31,6 +31,10 @@ const rl = createInterface({ input: process.stdin, output: process.stdout })
 const COMPLETION_KEYS = [
   'cloudflareAuth',
   'githubAuth',
+  'githubRepository',
+  'githubDiscussions',
+  'githubPages',
+  'discussionCategories',
   'workerConfig',
   'workerDeployment',
   'pat',
@@ -247,6 +251,98 @@ function ensureGitHubLogin(state) {
   writeState(state)
 }
 
+function githubApiJson(owner, repo, endpoint, extraArgs = []) {
+  const result = commandResult('gh', [
+    'api',
+    endpoint || `repos/${owner}/${repo}`,
+    ...extraArgs,
+  ], { capture: true })
+  try {
+    return JSON.parse(result.output.trim())
+  } catch (error) {
+    throw new Error(`GitHub API 返回了无法解析的结果：${error.message}`)
+  }
+}
+
+function requiredDiscussionCategories() {
+  const config = readFileSync(wranglerConfigPath, 'utf8')
+  return readTomlProperty(config, 'DISCUSSION_CATEGORIES', 'Notes,Announcements,General')
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean)
+}
+
+function readDiscussionCategories(owner, repo) {
+  return githubApiJson(owner, repo, `repos/${owner}/${repo}/discussions/categories`, [
+    '--jq',
+    '[.[].name]',
+  ])
+}
+
+async function ensureGitHubRepository(state) {
+  const { owner, repo } = state.target
+  const endpoint = `repos/${owner}/${repo}`
+  const repository = githubApiJson(owner, repo, endpoint, [
+    '--jq',
+    '{has_discussions,has_pages,permissions}',
+  ])
+  if (!repository.permissions?.admin) {
+    throw new Error(`GitHub 账号没有 ${owner}/${repo} 的 admin 权限，无法自动配置仓库设置。`)
+  }
+  if (!state.completed.githubRepository) saveCompletion(state, 'githubRepository')
+
+  if (!state.completed.githubDiscussions) {
+    if (!repository.has_discussions) {
+      if (!await confirm('GitHub Discussions 当前关闭，是否自动启用？', true)) {
+        throw new Error('Discussions 未启用，无法继续配置 Discussion 分类。')
+      }
+      commandResult('gh', ['api', '--method', 'PATCH', endpoint, '-F', 'has_discussions=true'])
+    }
+    saveCompletion(state, 'githubDiscussions')
+  }
+
+  if (!state.completed.githubPages) {
+    const pagesResult = commandResult('gh', [
+      'api',
+      `repos/${owner}/${repo}/pages`,
+      '--jq',
+      '{build_type,html_url}',
+    ], { capture: true, printOutput: false, allowFailure: true })
+    if (pagesResult.status !== 0) {
+      if (!await confirm('GitHub Pages 尚未启用，是否自动创建 Workflow 类型 Pages？', true)) {
+        throw new Error('GitHub Pages 未启用，无法继续。')
+      }
+      commandResult('gh', ['api', '--method', 'POST', `repos/${owner}/${repo}/pages`, '-f', 'build_type=workflow'])
+    } else {
+      const pages = JSON.parse(pagesResult.output.trim())
+      if (pages.build_type !== 'workflow') {
+        if (!await confirm('GitHub Pages 当前不是 Workflow 模式，是否切换？', true)) {
+          throw new Error('GitHub Pages 不是 Workflow 模式，无法继续。')
+        }
+        commandResult('gh', ['api', '--method', 'PUT', `repos/${owner}/${repo}/pages`, '-f', 'build_type=workflow'])
+      }
+    }
+    saveCompletion(state, 'githubPages')
+  }
+
+  if (!state.completed.discussionCategories) {
+    const required = requiredDiscussionCategories()
+    let existing = readDiscussionCategories(owner, repo)
+    let missing = required.filter((name) => !existing.includes(name))
+    while (missing.length) {
+      console.log(`\n缺少 Discussion 分类：${missing.join('、')}`)
+      console.log('GitHub 当前没有公开的分类创建 API，请在打开的仓库设置页中创建它们。')
+      openBrowser(`https://github.com/${owner}/${repo}/settings`)
+      if (!await confirm('分类创建完成后重新检查？', true)) {
+        throw new Error(`Discussion 分类尚未完整配置：${missing.join('、')}`)
+      }
+      existing = readDiscussionCategories(owner, repo)
+      missing = required.filter((name) => !existing.includes(name))
+    }
+    saveCompletion(state, 'discussionCategories')
+  }
+}
+
 function deployWorker() {
   const result = runWrangler(['deploy'], { capture: true })
   const match = result.output.match(/https:\/\/[^\s'"`]+\.workers\.dev(?:\/[^\s'"`]*)?/i)
@@ -433,8 +529,8 @@ function verifyLocalConfig(state) {
 
 async function applySetup(state, options) {
   ensureCloudflareLogin(state)
-  if (options.syncActions) ensureGitHubLogin(state)
-  else markSkipped(state, 'githubAuth')
+  ensureGitHubLogin(state)
+  await ensureGitHubRepository(state)
 
   if (!state.completed.workerConfig) {
     updateWorkerConfig(state.target)
@@ -586,6 +682,31 @@ async function doctor() {
   }
 
   if (github.status === 0) {
+    try {
+      const repository = githubApiJson(config.owner, config.repo, `repos/${config.owner}/${config.repo}`, [
+        '--jq',
+        '{has_discussions,has_pages,permissions}',
+      ])
+      if (!repository.permissions?.admin) issues.push('当前 GitHub 账号没有仓库 admin 权限')
+      if (!repository.has_discussions) {
+        issues.push('GitHub Discussions 尚未启用')
+      } else {
+        const categories = readDiscussionCategories(config.owner, config.repo)
+        const missing = requiredDiscussionCategories().filter((name) => !categories.includes(name))
+        if (missing.length) issues.push(`缺少 Discussion 分类：${missing.join('、')}`)
+      }
+      const pages = commandResult('gh', [
+        'api',
+        `repos/${config.owner}/${config.repo}/pages`,
+        '--jq',
+        '{build_type,html_url}',
+      ], { capture: true, printOutput: false, allowFailure: true })
+      if (pages.status !== 0) issues.push('GitHub Pages 尚未启用')
+      else if (JSON.parse(pages.output.trim()).build_type !== 'workflow') issues.push('GitHub Pages 不是 Workflow 模式')
+    } catch (error) {
+      issues.push(`GitHub 仓库设置检查失败：${error.message}`)
+    }
+
     const variables = commandResult('gh', ['variable', 'list', '--repo', `${config.owner}/${config.repo}`], {
       capture: true,
       allowFailure: true,
