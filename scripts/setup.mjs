@@ -100,7 +100,8 @@ function commandResult(command, commandArgs, options = {}) {
     cwd: options.cwd || rootDir,
     encoding: 'utf8',
     stdio: options.capture ? ['inherit', 'pipe', 'pipe'] : 'inherit',
-    shell: false,
+    // Windows exposes npx as a .cmd shim, which must be launched through the shell.
+    shell: options.shell ?? (process.platform === 'win32' && command.toLowerCase().endsWith('.cmd')),
   })
 
   if (result.error) {
