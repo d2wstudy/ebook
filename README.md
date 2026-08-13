@@ -35,7 +35,7 @@ npm run build
 npm run preview
 ```
 
-`npm run build` 会自动扫描 `content/**`，为所有动态章节和语言生成 VitePress 本地搜索索引，并检查索引非空、覆盖全部章节及输出 gzip 体积。索引随静态文件一起发布到 GitHub Pages，无需 Algolia 或搜索服务器。
+`npm run build` 会自动扫描 `content/**`，为所有动态章节和语言生成 VitePress 本地搜索索引。索引按实际 H1–H6 标题拆分，搜索结果默认显示命中的正文摘要并高亮关键词，点击后跳转到对应标题锚点。构建还会检查索引非空、覆盖全部章节并输出 gzip 体积。索引随静态文件一起发布到 GitHub Pages，无需 Algolia 或搜索服务器。
 
 也可以对现有构建产物单独执行检查：
 

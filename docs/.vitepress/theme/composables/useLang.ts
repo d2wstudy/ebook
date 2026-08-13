@@ -32,6 +32,15 @@ export function useLang() {
       .filter((language): language is string => !!language)
     availableLanguages.value = [...new Set(found)]
 
+    const hashLanguage = languageForHashTarget()
+    if (hashLanguage && availableLanguages.value.includes(hashLanguage)) {
+      defaultLanguage.value = hashLanguage
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY, hashLanguage)
+        localStorage.removeItem(LEGACY_STORAGE_KEY)
+      }
+    }
+
     // Keep a user's global preference even when this page has no translation;
     // applyDefaultLang() performs a page-local fallback without losing it.
     if (!defaultLanguage.value) {
@@ -50,6 +59,20 @@ export function useLang() {
     initLang,
     refreshLanguages,
   }
+}
+
+/** Reveal a heading reached from a search result even when it is in another language. */
+function languageForHashTarget(): string | undefined {
+  if (typeof window === 'undefined' || !window.location.hash) return undefined
+  let id = window.location.hash.slice(1)
+  try {
+    id = decodeURIComponent(id)
+  } catch {
+    // Invalid percent encoding should not break normal language fallback.
+  }
+  return document.getElementById(id)
+    ?.closest<HTMLElement>('.reader-language')
+    ?.dataset.language
 }
 
 export function applyDefaultLang() {

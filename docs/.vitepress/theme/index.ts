@@ -13,7 +13,12 @@ import Anno from './components/Anno.vue'
 import AnnotationLayer from './components/AnnotationLayer.vue'
 import ChapterComments from './components/ChapterComments.vue'
 import { readerDocument } from './readerRuntime'
+import { bookConfig } from '../../../book.config'
 import './style.css'
+
+const SEARCH_DETAILS_STORAGE_KEY = 'vitepress:local-search-detailed-list'
+const SEARCH_DETAILS_MIGRATION_KEY = `github-reader::${bookConfig.id}::search-details-version`
+const SEARCH_DETAILS_VERSION = '1'
 
 /** djb2 hash -> short base-36 string, used for stable reader block IDs. */
 function hashText(str: string): string {
@@ -47,6 +52,7 @@ export default {
   },
 
   setup() {
+    enableDetailedSearchByDefault()
     const { defaultLanguage, initLang, refreshLanguages } = useLang()
     const { init: initAuth } = useAuth()
     const route = useRoute()
@@ -70,6 +76,14 @@ export default {
     })
   },
 } satisfies Theme
+
+/** Enable the upgraded excerpt view once while preserving later user choices. */
+function enableDetailedSearchByDefault() {
+  if (typeof localStorage === 'undefined') return
+  if (localStorage.getItem(SEARCH_DETAILS_MIGRATION_KEY) === SEARCH_DETAILS_VERSION) return
+  localStorage.setItem(SEARCH_DETAILS_STORAGE_KEY, 'true')
+  localStorage.setItem(SEARCH_DETAILS_MIGRATION_KEY, SEARCH_DETAILS_VERSION)
+}
 
 /** Add generic annotation blocks without assuming a fixed language set. */
 function decorateReaderBlocks(path: string) {

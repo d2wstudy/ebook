@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitepress'
+import { createMarkdownRenderer, defineConfig } from 'vitepress'
 import container from 'markdown-it-container'
 import { bookConfig } from '../../book.config'
 import { bookGroups, bookLanguages, bookPages } from './bookContent'
@@ -74,6 +74,7 @@ export default defineConfig({
     search: {
       provider: 'local',
       options: {
+        detailedView: true,
         translations: {
           button: {
             buttonText: '搜索',
@@ -100,7 +101,10 @@ export default defineConfig({
             tokenize: tokenizeSearchText,
             processTerm: processSearchTerm,
           },
-          _splitIntoSections: splitBookSearchSections,
+          async _splitIntoSections(file, html) {
+            const markdown = await createMarkdownRenderer('docs')
+            return splitBookSearchSections(file, html, markdown)
+          },
         },
       },
     },

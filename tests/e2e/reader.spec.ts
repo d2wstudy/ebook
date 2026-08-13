@@ -216,11 +216,15 @@ test('本地搜索自动索引中文和英文动态章节', async ({ page }) => 
   const chineseResult = page.locator('.VPLocalSearchBox .result').filter({ hasText: '引言' })
   await expect(chineseResult).toBeVisible()
   await expect(chineseResult).toHaveAttribute('href', /\/ebook\/chapters\/01-introduction\.html#引言$/)
+  await expect(chineseResult.locator('.excerpt')).toContainText('构建器会自动发现')
+  await expect(chineseResult.locator('.excerpt mark')).not.toHaveCount(0)
 
   await searchInput.fill('independent Markdown source')
   const englishResult = page.locator('.VPLocalSearchBox .result').filter({ hasText: 'Content Model' })
   await expect(englishResult).toBeVisible()
   await expect(englishResult).toHaveAttribute('href', /\/ebook\/chapters\/02-content-model\.html#content-model$/)
+  await expect(englishResult.locator('.excerpt')).toContainText('independent Markdown source')
+  await expect(englishResult.locator('.excerpt mark')).not.toHaveCount(0)
 })
 
 test('页面缺少当前语言时回退到默认可用语言', async ({ page }) => {

@@ -1,9 +1,13 @@
-import { bookPages, type BookPage } from './bookContent'
+import { bookPages, pageContent, type BookPage } from './bookContent'
 
 interface SearchSection {
   anchor?: string
   titles: string[]
   text: string
+}
+
+export interface SearchMarkdownRenderer {
+  render(source: string, env?: Record<string, unknown>): string
 }
 
 const headingRegex = /<h(\d*).*?>(.*?<a.*? href="#.*?".*?>.*?<\/a>)<\/h\1>/gi
@@ -59,11 +63,37 @@ export function processSearchTerm(term: string): string | string[] | null {
  * Dynamic route pages have no physical Markdown file, so provide their
  * sections directly from the discovered bilingual book content.
  */
-export function splitBookSearchSections(file: string, html: string): SearchSection[] {
+export function splitBookSearchSections(
+  file: string,
+  html: string,
+  markdown?: SearchMarkdownRenderer,
+): SearchSection[] {
   const page = findBookPage(file)
   if (!page) return splitRenderedPageIntoSections(html)
 
-  const text = page.languages
+  if (markdown) {
+    const rendered = markdown.render(pageContent(page), {
+      path: file,
+      relativePath: chapterRelativePath(page),
+      cleanUrls: false,
+    })
+    const sections = splitRenderedPageIntoSections(rendered)
+    if (sections.length) return sections
+  }
+
+  return [{
+    anchor: slugifyHeading(page.title) || undefined,
+    titles: [page.title],
+    text: bookPageSearchText(page),
+  }]
+}
+
+function chapterRelativePath(page: BookPage): string {
+  return `chapters/${page.slug}.md`
+}
+
+function bookPageSearchText(page: BookPage): string {
+  return page.languages
     .flatMap(language => {
       const source = page.sources[language]
       if (!source) return []
@@ -75,12 +105,6 @@ export function splitBookSearchSections(file: string, html: string): SearchSecti
     })
     .filter(Boolean)
     .join('\n')
-
-  return [{
-    anchor: slugifyHeading(page.title) || undefined,
-    titles: [page.title],
-    text,
-  }]
 }
 
 function findBookPage(file: string): BookPage | undefined {
@@ -129,7 +153,7 @@ function slugifyHeading(value: string): string {
 }
 
 /** Preserve VitePress's normal indexing behavior for physical Markdown pages. */
-function splitRenderedPageIntoSections(html: string): SearchSection[] {
+export function splitRenderedPageIntoSections(html: string): SearchSection[] {
   const result = html.split(headingRegex)
   result.shift()
   const sections: SearchSection[] = []
