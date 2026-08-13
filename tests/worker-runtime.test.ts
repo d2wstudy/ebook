@@ -6,7 +6,6 @@ import { DiscussionCache } from '../worker/src/discussion-cache'
 import { githubGraphQl, githubRestRequest } from '../worker/src/github'
 import { RateLimitCoordinator } from '../worker/src/rate-limit'
 import type { ApiRequestBudget, WorkerEnv } from '../worker/src/types'
-import { invalidateMutationCacheSafely } from '../worker/src/index'
 
 const DOCUMENT_ID = '/ebook/chapters/01-introduction.html'
 const CATEGORY = 'Ideas'
@@ -26,7 +25,7 @@ describe('Worker HTTP guardrails', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('rejects arbitrary authenticated GraphQL before any GitHub request', async () => {
+  it('does not expose the former authenticated GraphQL proxy', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     const response = await exports.default.fetch('https://worker.example/api/github/graphql', {
       method: 'POST',
@@ -37,14 +36,14 @@ describe('Worker HTTP guardrails', () => {
       body: JSON.stringify({ query: 'query { viewer { login } }', variables: {} }),
     })
 
-    expect(response.status).toBe(400)
+    expect(response.status).toBe(404)
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it('coalesces concurrent cold reads and serves subsequent reads from SQLite', async () => {
     let requestCount = 0
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async input => {
-      const request = new Request(input)
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = new Request(input, init)
       expect(request.url).toBe('https://api.github.com/graphql')
       requestCount++
       await Promise.resolve()
@@ -113,24 +112,142 @@ describe('Worker HTTP guardrails', () => {
     expect(stale.headers.get('X-Cache')).toBe('STALE')
   })
 
-  it('swallows cache invalidation errors after a successful mutation', async () => {
-    const failingNamespace = new Proxy(env.DISCUSSION_CACHE, {
-      get(target, property, receiver) {
-        if (property === 'getByName') {
-          return () => ({
-            invalidate: () => Promise.reject(new Error('invalidation failed')),
-          })
-        }
-        return Reflect.get(target, property, receiver)
+  it('accepts tokenless cache invalidation for an allowed document', async () => {
+    const response = await exports.default.fetch('https://worker.example/api/cache/invalidate', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://d2wstudy.github.io',
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({ documentId: DOCUMENT_ID, categoryName: CATEGORY }),
     })
-    const failingEnv = { ...env, DISCUSSION_CACHE: failingNamespace }
+    expect(response.status).toBe(202)
+  })
 
-    await expect(invalidateMutationCacheSafely(
-      failingEnv,
-      'user-token',
-      { documentId: DOCUMENT_ID, categoryName: CATEGORY },
-    )).resolves.toBeUndefined()
+  it('rejects cache invalidation without a browser Origin', async () => {
+    const response = await exports.default.fetch('https://worker.example/api/cache/invalidate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ documentId: DOCUMENT_ID, categoryName: CATEGORY }),
+    })
+    expect(response.status).toBe(403)
+  })
+
+  it('exchanges a GitHub App authorization code into an encrypted session', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = new Request(input, init)
+      if (request.url === 'https://github.com/login/oauth/access_token') {
+        return Response.json({
+          access_token: 'ghu_test',
+          expires_in: 28_800,
+          refresh_token: 'ghr_test',
+          refresh_token_expires_in: 15_897_600,
+          token_type: 'bearer',
+        })
+      }
+      return fetch(input, init)
+    })
+
+    const response = await exports.default.fetch('https://worker.example/api/auth/exchange', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://d2wstudy.github.io',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        code: 'authorization-code',
+        code_verifier: 'v'.repeat(43),
+        redirect_uri: 'https://d2wstudy.github.io/ebook/',
+      }),
+    })
+    const data = await response.json() as { access_token: string; session: string }
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Cache-Control')).toBe('no-store')
+    expect(data.access_token).toBe('ghu_test')
+    expect(data.session).toMatch(/^v1\./)
+
+    const githubRequest = new Request(vi.mocked(globalThis.fetch).mock.calls[0][0])
+    expect(githubRequest.url).toBe('https://github.com/login/oauth/access_token')
+  })
+
+  it('rotates an expiring GitHub App session without another authorization page', async () => {
+    let oauthRequests = 0
+    const oauthBodies: Array<Record<string, string>> = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = new Request(input, init)
+      if (request.url !== 'https://github.com/login/oauth/access_token') return fetch(input, init)
+      oauthRequests++
+      oauthBodies.push(Object.fromEntries(
+        [...(await request.clone().formData()).entries()]
+          .map(([key, value]) => [key, String(value)]),
+      ))
+      return Response.json(oauthRequests === 1 ? {
+        access_token: 'ghu_old',
+        expires_in: 1,
+        refresh_token: 'ghr_old',
+        refresh_token_expires_in: 15_897_600,
+      } : {
+        access_token: 'ghu_new',
+        expires_in: 28_800,
+        refresh_token: 'ghr_new',
+        refresh_token_expires_in: 15_897_600,
+      })
+    })
+
+    const exchange = await exports.default.fetch('https://worker.example/api/auth/exchange', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://d2wstudy.github.io',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        code: 'authorization-code',
+        code_verifier: 'v'.repeat(43),
+        redirect_uri: 'https://d2wstudy.github.io/ebook/',
+      }),
+    })
+    const first = await exchange.json() as { session: string }
+    const restored = await exports.default.fetch('https://worker.example/api/auth/session', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://d2wstudy.github.io',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ session: first.session, force: true }),
+    })
+    const second = await restored.json() as { access_token: string; session: string }
+    expect(second.access_token).toBe('ghu_new')
+    expect(second.session).not.toBe(first.session)
+    expect(oauthBodies[1].grant_type).toBe('refresh_token')
+  })
+
+  it('verifies GitHub webhook HMAC before invalidating cache', async () => {
+    const body = JSON.stringify({
+      repository: { full_name: 'd2wstudy/ebook' },
+      discussion: { title: DOCUMENT_ID, category: { name: CATEGORY } },
+    })
+    const signature = await webhookSignature(body, 'test-webhook-secret')
+    const accepted = await exports.default.fetch('https://worker.example/api/github/webhook', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-GitHub-Event': 'discussion',
+        'X-Hub-Signature-256': signature,
+      },
+      body,
+    })
+    expect(accepted.status).toBe(202)
+
+    const rejected = await exports.default.fetch('https://worker.example/api/github/webhook', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-GitHub-Event': 'discussion',
+        'X-Hub-Signature-256': 'sha256=' + '00'.repeat(32),
+      },
+      body,
+    })
+    expect(rejected.status).toBe(401)
   })
 })
 
@@ -406,4 +523,20 @@ function workerEnv(overrides: Record<string, string>): WorkerEnv {
     configurable: true,
   })
   return rateEnv
+}
+
+async function webhookSignature(body: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+  const signature = new Uint8Array(await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(body),
+  ))
+  return `sha256=${Array.from(signature, byte => byte.toString(16).padStart(2, '0')).join('')}`
 }

@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { isAllowedGraphQlOperation } from '../worker/src/graphql-allowlist'
 import {
   defaultAllowedDocumentIds,
   validateDiscussionParams,
@@ -71,21 +70,5 @@ describe('Worker request validation', () => {
       category: 'Ideas',
       id: 'bad\nvalue',
     }), config)).toMatchObject({ error: 'Invalid discussion id', status: 400 })
-  })
-})
-
-describe('Worker GraphQL allowlist', () => {
-  it('allows repository metadata and supported discussion mutations only', () => {
-    expect(isAllowedGraphQlOperation(`query($owner: String!, $name: String!) {
-      repository(owner: $owner, name: $name) {
-        id
-        discussionCategories(first: 50) { nodes { id name } }
-      }
-    }`)).toBe(true)
-    expect(isAllowedGraphQlOperation(`mutation($subjectId: ID!) {
-      addReaction(input: { subjectId: $subjectId, content: HEART }) { reaction { content } }
-    }`)).toBe(true)
-    expect(isAllowedGraphQlOperation('query { viewer { login } }')).toBe(false)
-    expect(isAllowedGraphQlOperation('query { rateLimit { remaining } }')).toBe(false)
   })
 })

@@ -23,7 +23,6 @@ export const readerConfig = defineReaderConfig({
       import.meta.env.VITE_WORKER_URL || bookConfig.github.workerUrl
     ).replace(/\/+$/, ''),
     oauthClientId: import.meta.env.VITE_GITHUB_CLIENT_ID || '',
-    oauthScope: 'public_repo',
   },
   discussions: {
     annotationCategory: 'Ideas',

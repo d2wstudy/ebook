@@ -17,7 +17,8 @@ book.config.ts + content/<language>/chapters/*.md
        -> 精确页面白名单
        -> DiscussionCache SQLite Durable Object（每页面/分类）
        -> RateLimitCoordinator SQLite Durable Object
-       -> GitHub OAuth / GraphQL / REST
+       -> GitHub App exchange / refresh / installation token / Webhook
+  -> api.github.com（登录用户的浏览器直连 GraphQL）
 ```
 
 语言由 `content/` 的一级目录自动发现。不同语言中 slug 相同的 Markdown 会生成同一个页面和 `documentId`，因此章节讨论不会随语言重复创建。
@@ -34,8 +35,8 @@ book.config.ts + content/<language>/chapters/*.md
 
 ### `@github-reader/github`
 
-- 所有 GitHub GraphQL mutation 经 Worker 代理。
-- Worker discussion 读取、强制刷新与 mutation 缓存失效协议。
+- GitHub GraphQL mutation 由浏览器携带短期 user token 直连。
+- Worker discussion 公共读取、强制刷新、签名 Webhook 与 tokenless 缓存失效提示协议。
 - GitHub 数据到通用评论模型的映射。
 - 通过 `GitHubAuthBridge` 获取 token，不依赖 Vue。
 
@@ -104,6 +105,7 @@ slug: 01-introduction
   "vars": {
     "REPO_OWNER": "publisher",
     "REPO_NAME": "my-book",
+    "GITHUB_REPOSITORY_ID": "123456789",
     "DOCUMENT_PATH_PREFIX": "/my-book/",
     "DISCUSSION_CATEGORIES": "Ideas,General",
     "ALLOWED_ORIGINS": "https://publisher.github.io,http://localhost:15689"
@@ -111,14 +113,14 @@ slug: 01-introduction
 }
 ```
 
-Secrets 包括 OAuth client secret 和匿名读取用 PAT。浏览器请求不能动态指定仓库、分类白名单或允许 Origin，也不存在公开缓存清理接口。
+Secrets 包括 User Auth App client secret、Reader App private key、session secret 和 Webhook secret；`GITHUB_PAT` 仅作为迁移期只读回退。浏览器请求不能动态指定仓库、分类白名单或允许 Origin。缓存失效接口只接受白名单 Origin、生成的页面 ID 和固定分类，不接收用户 token。
 
 Worker 的调用上限保护分为两层：
 
 - `DiscussionCache` 按 `documentId + category` 分片，SQLite 持久保存 fresh/stale 内容，并合并同一页面的并发冷请求。
-- `RateLimitCoordinator` 按 token 协调主配额；按仓库原子协调 GraphQL/REST secondary points、共享并发 lease、内容生成 60 秒/1 小时滚动预算及 mutative request 最小间隔；OAuth 使用独立滚动预算。GraphQL mutation 和 REST 写方法均按 5 points 计费。
+- `RateLimitCoordinator` 保护 Worker 公共读取、OAuth exchange/refresh/revoke 和 tokenless 缓存提示。浏览器直连的用户写操作由 GitHub 自身的用户/App 限额负责。
 
-GitHub 限额或暂时故障时，仍在 stale TTL 内的共享 Discussion 可以继续返回；登录用户 Reaction overlay 若遇到 `429/5xx` 会降级为未标记 viewer reaction，`401` 仍会传递给前端使会话失效。
+GitHub 限额或暂时故障时，仍在 stale TTL 内的共享 Discussion 可以继续返回。共享缓存从不保存用户 Reaction 状态；登录用户由浏览器直连 `nodes(ids:)` 获取 `viewerHasReacted`，overlay 失败时降级为共享结果。
 
 ## 稳定身份
 

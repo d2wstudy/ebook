@@ -7,8 +7,11 @@ export default defineProject({
       miniflare: {
         bindings: {
           GITHUB_PAT: 'test-pat',
-          GITHUB_CLIENT_ID: 'test-client',
-          GITHUB_CLIENT_SECRET: 'test-secret',
+          GITHUB_REPOSITORY_ID: '1330540843',
+          GITHUB_AUTH_APP_CLIENT_ID: 'test-client',
+          GITHUB_AUTH_APP_CLIENT_SECRET: 'test-secret',
+          AUTH_SESSION_SECRET: 'test-session-secret-at-least-32-bytes',
+          GITHUB_WEBHOOK_SECRET: 'test-webhook-secret',
         },
       },
       wrangler: {

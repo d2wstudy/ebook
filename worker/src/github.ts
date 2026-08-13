@@ -3,7 +3,6 @@ import type {
   DiscussionResult,
   GitHubCommentNode,
   GitHubRateState,
-  UserReactionMap,
   WorkerEnv,
 } from './types'
 
@@ -209,38 +208,6 @@ export async function githubOAuthRequest(
   } catch {
     throw new GitHubRequestError('Unable to connect to GitHub OAuth service', 502)
   }
-}
-
-export async function fetchUserReactions(
-  env: WorkerEnv,
-  token: string,
-  subjectIds: string[],
-  onRate: (rate: GitHubRateState) => Promise<void>,
-): Promise<UserReactionMap> {
-  const result: UserReactionMap = {}
-  for (let start = 0; start < subjectIds.length; start += 100) {
-    const ids = subjectIds.slice(start, start + 100)
-    const data = await githubGql(env, token, `query($ids: [ID!]!) {
-      nodes(ids: $ids) {
-        ... on DiscussionComment {
-          id
-          reactionGroups { content viewerHasReacted }
-        }
-      }
-    }`, { ids }, onRate)
-
-    for (const raw of asArray(data.nodes)) {
-      const node = asRecord(raw)
-      if (!node?.id) continue
-      for (const rawGroup of asArray(node.reactionGroups)) {
-        const group = asRecord(rawGroup)
-        if (!group?.viewerHasReacted || typeof group.content !== 'string') continue
-        result[String(node.id)] ||= {}
-        result[String(node.id)][group.content] = true
-      }
-    }
-  }
-  return result
 }
 
 async function fetchDiscussionMetaById(

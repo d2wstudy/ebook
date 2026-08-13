@@ -137,7 +137,7 @@ async function onDelete(subjectId: string) {
         <div>
           <strong>加入章节讨论</strong>
           <p>使用 GitHub 登录后即可评论、回复和添加表情回应。</p>
-          <p class="auth-scope-hint">登录会申请公开仓库（public_repo）权限，仅用于同步讨论、笔记和回应。</p>
+          <p class="auth-scope-hint">登录仅使用此 GitHub App 在目标仓库的 Discussions 权限；评论和回应由浏览器直连 GitHub。</p>
         </div>
         <button type="button" class="login-btn" @click="login">登录 GitHub</button>
       </div>

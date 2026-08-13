@@ -88,8 +88,8 @@ const COMPLETION_KEYS = [
   'discussionCategories',
   'workerConfig',
   'workerDeployment',
-  'pat',
-  'oauth',
+  'readApp',
+  'authApp',
   'secretsDeployment',
   'bookConfig',
   'actionsVariables',
@@ -107,9 +107,35 @@ function emptyCompletion() {
 function readState() {
   if (!existsSync(statePath)) return null
   try {
-    return JSON.parse(readFileSync(statePath, 'utf8'))
+    return migrateState(JSON.parse(readFileSync(statePath, 'utf8')))
   } catch (error) {
     throw new Error(`无法读取 ${statePath}：${error.message}`)
+  }
+}
+
+function migrateState(state) {
+  if (!state || state.version === 2) return state
+  if (state.version !== 1) return state
+  const options = state.options || {}
+  const completed = state.completed || {}
+  return {
+    ...state,
+    version: 2,
+    options: {
+      syncActions: options.syncActions ?? true,
+      pushChanges: options.pushChanges ?? false,
+    },
+    completed: {
+      ...emptyCompletion(),
+      ...completed,
+      workerConfig: false,
+      readApp: false,
+      authApp: false,
+      secretsDeployment: false,
+      bookConfig: false,
+      actionsVariables: false,
+      verification: false,
+    },
   }
 }
 
@@ -132,7 +158,7 @@ function writeState(state) {
 
 function createState(target, options, previous = {}) {
   return {
-    version: 1,
+    version: 2,
     runId: `${Date.now()}-${process.pid}`,
     startedAt: now(),
     updatedAt: now(),
@@ -443,6 +469,12 @@ function updateWorkerConfig({ owner, repo, base, pagesOrigin, workerName }) {
   atomicWrite(wranglerConfigPath, source)
 }
 
+function updateWorkerRepositoryId(repositoryId) {
+  let source = readFileSync(wranglerConfigPath, 'utf8')
+  source = replaceWranglerProperty(source, 'GITHUB_REPOSITORY_ID', String(repositoryId))
+  atomicWrite(wranglerConfigPath, source)
+}
+
 function updateLocalEnv({ owner, repo, workerUrl, clientId }) {
   const current = existsSync(localEnvPath) ? readFileSync(localEnvPath, 'utf8') : ''
   const values = {
@@ -558,8 +590,8 @@ function showPlan(current, target, options) {
   console.log('\n配置变更计划：')
   if (!changes.length) console.log('- 公开配置没有变化（Worker URL 会在部署后确认）。')
   for (const [key, before, after] of changes) console.log(`- ${key}: ${before || '(空)'} -> ${after || '(空)'}`)
-  console.log(`- GITHUB_PAT: ${options.configurePat ? '配置或保留' : '跳过'}`)
-  console.log(`- GitHub OAuth: ${options.configureOAuth ? '配置或保留' : '跳过'}`)
+  console.log(`- Worker Reader GitHub App: ${options.configureReadApp ? '配置或保留' : '跳过（可回退 GITHUB_PAT）'}`)
+  console.log(`- User Auth GitHub App: ${options.configureAuthApp ? '配置或保留' : '跳过'}`)
   console.log(`- GitHub Actions Variables: ${options.syncActions ? '同步' : '跳过'}`)
   console.log('- 远程 Worker 不会在 plan 模式中修改。')
 }
@@ -577,11 +609,16 @@ async function collectTarget(state, reconfigure) {
 }
 
 async function collectOptions(state, reconfigure) {
-  if (state?.options && !reconfigure) return state.options
+  if (
+    state?.options
+    && !reconfigure
+    && typeof state.options.configureReadApp === 'boolean'
+    && typeof state.options.configureAuthApp === 'boolean'
+  ) return state.options
   const previous = state?.options || {}
   return {
-    configurePat: await confirm('配置或轮换 GITHUB_PAT？', previous.configurePat ?? true),
-    configureOAuth: await confirm('配置或轮换 GitHub OAuth？', previous.configureOAuth ?? true),
+    configureReadApp: await confirm('配置或轮换 Worker Reader GitHub App？', previous.configureReadApp ?? true),
+    configureAuthApp: await confirm('配置或轮换 User Auth GitHub App？', previous.configureAuthApp ?? true),
     syncActions: await confirm('同步 GitHub Actions Variables？', previous.syncActions ?? true),
     pushChanges: await confirm('完成后提交并推送配置？', false),
   }
@@ -633,6 +670,13 @@ async function applySetup(state, options, runtime = {}) {
 
   if (!state.completed.workerConfig) {
     updateWorkerConfig(state.target)
+    const repository = githubApiJson(
+      state.target.owner,
+      state.target.repo,
+      `repos/${state.target.owner}/${state.target.repo}`,
+      ['--jq', '{id}'],
+    )
+    updateWorkerRepositoryId(repository.id)
     commandResult(npmCommand, ['run', 'generate:worker-documents'])
     saveCompletion(state, 'workerConfig')
   }
@@ -643,30 +687,40 @@ async function applySetup(state, options, runtime = {}) {
     console.log(`Worker URL: ${state.workerUrl}`)
   }
 
-  if (options.configurePat && !state.completed.pat) {
-    console.log('请在 Wrangler 提示中粘贴 GITHUB_PAT；输入内容不会写入项目文件。')
-    runWrangler(['secret', 'put', 'GITHUB_PAT'])
-    saveCompletion(state, 'pat')
-  } else if (!options.configurePat) markSkipped(state, 'pat')
+  if (options.configureReadApp && !state.completed.readApp) {
+    console.log('\n请创建只安装到目标仓库的 Worker Reader GitHub App，权限仅保留 Metadata: Read-only 和 Discussions: Read-only。')
+    openBrowser('https://github.com/settings/apps/new')
+    console.log('请在 Wrangler 提示中依次保存 Reader App ID、installation ID 和 private key。')
+    runWrangler(['secret', 'put', 'GITHUB_READ_APP_ID'])
+    runWrangler(['secret', 'put', 'GITHUB_READ_APP_INSTALLATION_ID'])
+    runWrangler(['secret', 'put', 'GITHUB_READ_APP_PRIVATE_KEY'])
+    saveCompletion(state, 'readApp')
+  } else if (!options.configureReadApp) markSkipped(state, 'readApp')
 
-  if (options.configureOAuth && !state.completed.oauth) {
+  if (options.configureAuthApp && !state.completed.authApp) {
     const callbackUrl = `${state.target.pagesOrigin}${state.target.base}`
-    console.log(`\n请在 GitHub OAuth App 中设置 callback URL：${callbackUrl}`)
-    openBrowser('https://github.com/settings/developers')
-    const clientId = await ask('OAuth App Client ID')
-    if (!clientId) throw new Error('OAuth Client ID 不能为空。')
+    console.log(`\n请创建 User Auth GitHub App，callback URL：${callbackUrl}`)
+    console.log('Repository permissions 仅保留 Metadata: Read-only 和 Discussions: Read and write，并安装到目标仓库。')
+    console.log('请保持 User-to-server token expiration 启用。')
+    openBrowser('https://github.com/settings/apps/new')
+    const clientId = await ask('GitHub App Client ID')
+    if (!clientId) throw new Error('GitHub App Client ID 不能为空。')
     state.options.clientId = clientId
-    console.log('请在 Wrangler 提示中输入 OAuth Client ID。')
-    runWrangler(['secret', 'put', 'GITHUB_CLIENT_ID'])
-    console.log('请在 Wrangler 提示中粘贴 OAuth Client Secret。')
-    runWrangler(['secret', 'put', 'GITHUB_CLIENT_SECRET'])
-    saveCompletion(state, 'oauth')
-  } else if (!options.configureOAuth) markSkipped(state, 'oauth')
+    console.log('请在 Wrangler 提示中输入 GitHub App Client ID。')
+    runWrangler(['secret', 'put', 'GITHUB_AUTH_APP_CLIENT_ID'])
+    console.log('请在 Wrangler 提示中粘贴 GitHub App Client Secret。')
+    runWrangler(['secret', 'put', 'GITHUB_AUTH_APP_CLIENT_SECRET'])
+    console.log('请生成至少 32 字节的随机 AUTH_SESSION_SECRET。')
+    runWrangler(['secret', 'put', 'AUTH_SESSION_SECRET'])
+    console.log('请设置 GitHub App Webhook secret（事件选择 discussion、discussion_comment）。')
+    runWrangler(['secret', 'put', 'GITHUB_WEBHOOK_SECRET'])
+    saveCompletion(state, 'authApp')
+  } else if (!options.configureAuthApp) markSkipped(state, 'authApp')
 
-  if ((options.configurePat || options.configureOAuth) && !state.completed.secretsDeployment) {
+  if ((options.configureReadApp || options.configureAuthApp) && !state.completed.secretsDeployment) {
     runWrangler(['deploy'])
     saveCompletion(state, 'secretsDeployment')
-  } else if (!options.configurePat && !options.configureOAuth) markSkipped(state, 'secretsDeployment')
+  } else if (!options.configureReadApp && !options.configureAuthApp) markSkipped(state, 'secretsDeployment')
 
   if (!state.completed.bookConfig) {
     updateBookConfig({ ...state.target, workerUrl: state.workerUrl })
@@ -844,7 +898,7 @@ async function cleanup() {
     commandResult('gh', ['variable', 'delete', 'VITE_WORKER_URL', '--repo', repository, '--confirm'], { allowFailure: true })
     commandResult('gh', ['variable', 'delete', 'VITE_GITHUB_CLIENT_ID', '--repo', repository, '--confirm'], { allowFailure: true })
   }
-  console.log('Cloudflare Worker 和所选 Actions Variables 已处理。PAT/OAuth 凭证仍需在各自平台手动撤销。')
+  console.log('Cloudflare Worker 和所选 Actions Variables 已处理。GitHub Apps 和相关授权仍需在 GitHub 中手动卸载或撤销。')
 }
 
 async function setup() {
@@ -852,8 +906,13 @@ async function setup() {
   if (!existsSync(bookConfigPath) || !existsSync(wranglerConfigPath)) throw new Error('当前目录不是电子书模板根目录。')
   const reconfigure = args.has('--reconfigure')
   let state = readState()
-  if (state?.completed?.verification && !reconfigure) {
-    console.log('当前配置已经完成。需要修改配置时执行 npm run setup -- --reconfigure。')
+  if (
+    state?.completed?.verification
+    && state.completed.readApp
+    && state.completed.authApp
+    && !reconfigure
+  ) {
+    console.log('当前 GitHub App 配置已经完成。需要修改配置时执行 npm run setup -- --reconfigure。')
     return
   }
 

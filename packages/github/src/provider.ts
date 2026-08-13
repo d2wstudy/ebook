@@ -11,7 +11,7 @@ import { mapGitHubComment, mapGitHubEntry, mapGitHubReply } from './mapping'
 
 export interface GitHubAuthBridge {
   getToken(): string | null
-  invalidate(): void
+  refresh(): Promise<string | null>
 }
 
 export interface GitHubDiscussionProviderConfig {
@@ -50,32 +50,26 @@ export function createGitHubDiscussionProvider(
   async function gql(
     query: string,
     variables: Record<string, unknown>,
-    cacheContext?: DiscussionMutationContext,
-  ) {
-    const token = auth.getToken()
+  ): Promise<Record<string, any>> {
+    let token = auth.getToken()
     if (!token) throw new GitHubProviderError('请先登录 GitHub。', 401)
 
-    let response: Response
-    try {
-      response = await fetch(`${config.workerUrl}/api/github/graphql`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ query, variables, cache: cacheContext }),
-      })
-    } catch {
-      throw new GitHubProviderError('无法连接 GitHub API。')
+    let response = await githubGraphQlRequest(token, query, variables)
+    if (response.status === 401) {
+      const latest = auth.getToken()
+      const refreshed = latest && latest !== token ? latest : await auth.refresh()
+      if (refreshed) {
+        token = refreshed
+        response = await githubGraphQlRequest(token, query, variables)
+      }
     }
 
     const json = await safeJson(response)
     if (response.status === 401) {
-      auth.invalidate()
       throw new GitHubProviderError('GitHub 登录已失效，请重新登录。', 401)
     }
     if (response.status === 403 || response.status === 429) {
-      throw new GitHubProviderError('GitHub API 速率限制已触发，请稍后重试。', response.status)
+      throw new GitHubProviderError('GitHub API 速率限制或权限校验未通过，请稍后重试。', response.status)
     }
     if (!response.ok) {
       throw new GitHubProviderError(`GitHub API 请求失败（${response.status}）。`, response.status)
@@ -87,7 +81,26 @@ export function createGitHubDiscussionProvider(
         .join('；')
       throw new GitHubProviderError(message || 'GitHub GraphQL 请求失败。')
     }
-    return json.data
+    return json.data || {}
+  }
+
+  async function githubGraphQlRequest(
+    token: string,
+    query: string,
+    variables: Record<string, unknown>,
+  ): Promise<Response> {
+    try {
+      return await fetch('https://api.github.com/graphql', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ query, variables }),
+      })
+    } catch {
+      throw new GitHubProviderError('无法连接 GitHub API。')
+    }
   }
 
   async function fetchRepositoryMeta(): Promise<{ repoId: string; categories: Map<string, string> }> {
@@ -130,22 +143,19 @@ export function createGitHubDiscussionProvider(
   ): Promise<DiscussionThreadResult> {
     const params = new URLSearchParams({ path: documentId, category: categoryName })
     if (knownDiscussionId) params.set('id', knownDiscussionId)
-    if (force) params.set('force', '1')
-
-    const headers: Record<string, string> = {}
-    const token = auth.getToken()
-    if (token) headers.Authorization = `Bearer ${token}`
+    if (force) {
+      await sendCacheInvalidation({ documentId, categoryName })
+    }
 
     let response: Response
     try {
-      response = await fetch(`${config.workerUrl}/api/discussions?${params}`, { headers })
+      response = await fetch(`${config.workerUrl}/api/discussions?${params}`)
     } catch {
       throw new GitHubProviderError('无法连接评论服务，请稍后重试。')
     }
 
     const data = await safeJson(response)
     if (!response.ok) {
-      if (response.status === 401) auth.invalidate()
       throw new GitHubProviderError(
         typeof data?.error === 'string' ? data.error : `评论服务请求失败（${response.status}）。`,
         response.status,
@@ -160,11 +170,85 @@ export function createGitHubDiscussionProvider(
           category: data.category || categoryName,
         }
       : null)
+    const comments = Array.isArray(data.comments) ? data.comments : []
+    try {
+      await overlayViewerReactions(comments)
+    } catch {
+      // Shared discussion data remains readable if the viewer overlay is rate-limited.
+    }
 
     return {
       discussion,
-      comments: Array.isArray(data.comments) ? data.comments.map(mapGitHubComment) : [],
+      comments: comments.map(mapGitHubComment),
     }
+  }
+
+  async function overlayViewerReactions(comments: any[]): Promise<void> {
+    if (!auth.getToken()) return
+    const ids = collectCommentIds(comments)
+    if (!ids.length) return
+
+    for (let start = 0; start < ids.length; start += 100) {
+      const batch = ids.slice(start, start + 100)
+      const data = await gql(`query($ids: [ID!]!) {
+        nodes(ids: $ids) {
+          ... on DiscussionComment {
+            id
+            reactionGroups { content viewerHasReacted }
+          }
+        }
+      }`, { ids: batch })
+      const overlay = new Map<string, Map<string, boolean>>()
+      for (const node of data.nodes || []) {
+        if (!node?.id) continue
+        overlay.set(node.id, new Map(
+          (node.reactionGroups || []).map((group: any) => [group.content, group.viewerHasReacted === true]),
+        ))
+      }
+      forEachComment(comments, comment => {
+        const reactions = overlay.get(comment.id)
+        if (!reactions) return
+        for (const group of comment.reactionGroups || []) {
+          group.viewerHasReacted = reactions.get(group.content) === true
+        }
+      })
+    }
+  }
+
+  function notifyCache(context: DiscussionMutationContext): void {
+    void sendCacheInvalidation(context)
+  }
+
+  async function sendCacheInvalidation(context: DiscussionMutationContext): Promise<void> {
+    const body = {
+      documentId: context.documentId,
+      categoryName: context.categoryName,
+      dropCache: context.dropCache === true,
+    }
+    try {
+      await fetch(`${config.workerUrl}/api/cache/invalidate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        keepalive: true,
+      })
+    } catch {
+      // GitHub is authoritative; this request only accelerates shared-cache refresh.
+    }
+  }
+
+  async function mutation<T>(
+    context: DiscussionMutationContext,
+    query: string,
+    variables: Record<string, unknown>,
+    select: (data: Record<string, any>) => T | null | undefined,
+    failureMessage: string,
+  ): Promise<T> {
+    const data = await gql(query, variables)
+    const result = select(data)
+    if (result === null || result === undefined) throw new GitHubProviderError(failureMessage)
+    notifyCache(context)
+    return result
   }
 
   const provider: GitHubDiscussionProvider = {
@@ -174,8 +258,7 @@ export function createGitHubDiscussionProvider(
       knownDiscussionId?: string | null,
       force = false,
     ): Promise<DiscussionThreadResult> {
-      const token = auth.getToken()
-      const authKey = token ? token.slice(-8) : 'anonymous'
+      const authKey = auth.getToken() ? 'authenticated' : 'anonymous'
       const key = `${categoryName}::${documentId}::${authKey}::${force ? 'force' : 'normal'}`
       const inflight = inflightDiscussions.get(key)
       if (inflight) return inflight
@@ -199,85 +282,71 @@ export function createGitHubDiscussionProvider(
       if (!categoryId) {
         throw new GitHubProviderError(`GitHub Discussions 中不存在“${categoryName}”分类。`)
       }
-
-      const data = await gql(`mutation($repoId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
+      const context = { documentId, categoryName, dropCache: true }
+      return mutation(context, `mutation($repoId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
         createDiscussion(input: { repositoryId: $repoId, categoryId: $categoryId, title: $title, body: $body }) {
           discussion { id url number category { name } }
         }
-      }`, { repoId, categoryId, title: documentId, body: bodyText }, {
-        documentId,
-        categoryName,
-        dropCache: true,
-      })
-
-      const discussion = data?.createDiscussion?.discussion
-      if (!discussion?.id) throw new GitHubProviderError('创建 GitHub Discussion 失败。')
-      return {
-        id: discussion.id,
-        url: discussion.url,
-        number: discussion.number,
-        category: discussion.category?.name || categoryName,
-      }
+      }`, { repoId, categoryId, title: documentId, body: bodyText }, data => {
+        const discussion = data?.createDiscussion?.discussion
+        return discussion?.id ? {
+          id: discussion.id,
+          url: discussion.url,
+          number: discussion.number,
+          category: discussion.category?.name || categoryName,
+        } : null
+      }, '创建 GitHub Discussion 失败。')
     },
 
     async addComment(context: DiscussionMutationContext, body: string): Promise<ThreadComment> {
       const discussionId = requiredDiscussionId(context)
-      const data = await gql(`mutation($discussionId: ID!, $body: String!) {
+      const comment = await mutation(context, `mutation($discussionId: ID!, $body: String!) {
         addDiscussionComment(input: { discussionId: $discussionId, body: $body }) {
           comment { ${COMMENT_MUTATION_FIELDS} }
         }
-      }`, { discussionId, body }, context)
-      const comment = data?.addDiscussionComment?.comment
-      if (!comment) throw new GitHubProviderError('发表评论失败。')
+      }`, { discussionId, body }, data => data?.addDiscussionComment?.comment, '发表评论失败。')
       return mapGitHubComment(comment)
     },
 
     async addReply(context: DiscussionMutationContext, replyToId: string, body: string): Promise<ThreadReply> {
       const discussionId = requiredDiscussionId(context)
-      const data = await gql(`mutation($discussionId: ID!, $replyToId: ID!, $body: String!) {
+      const comment = await mutation(context, `mutation($discussionId: ID!, $replyToId: ID!, $body: String!) {
         addDiscussionComment(input: { discussionId: $discussionId, replyToId: $replyToId, body: $body }) {
           comment { ${COMMENT_MUTATION_FIELDS} }
         }
-      }`, { discussionId, replyToId, body }, context)
-      const comment = data?.addDiscussionComment?.comment
-      if (!comment) throw new GitHubProviderError('发表回复失败。')
+      }`, { discussionId, replyToId, body }, data => data?.addDiscussionComment?.comment, '发表回复失败。')
       return mapGitHubReply(comment)
     },
 
     async updateComment(context: DiscussionMutationContext, commentId: string, body: string): Promise<ThreadEntry> {
-      const data = await gql(`mutation($commentId: ID!, $body: String!) {
+      const comment = await mutation(context, `mutation($commentId: ID!, $body: String!) {
         updateDiscussionComment(input: { commentId: $commentId, body: $body }) {
           comment { ${COMMENT_MUTATION_FIELDS} }
         }
-      }`, { commentId, body }, context)
-      const comment = data?.updateDiscussionComment?.comment
-      if (!comment) throw new GitHubProviderError('更新内容失败。')
+      }`, { commentId, body }, data => data?.updateDiscussionComment?.comment, '更新内容失败。')
       return mapGitHubEntry(comment)
     },
 
     async deleteComment(context: DiscussionMutationContext, commentId: string): Promise<void> {
-      const data = await gql(`mutation($id: ID!) {
+      await mutation(context, `mutation($id: ID!) {
         deleteDiscussionComment(input: { id: $id }) { clientMutationId }
-      }`, { id: commentId }, context)
-      if (!data?.deleteDiscussionComment) throw new GitHubProviderError('删除内容失败。')
+      }`, { id: commentId }, data => data?.deleteDiscussionComment, '删除内容失败。')
     },
 
     async addReaction(context: DiscussionMutationContext, subjectId: string, content: string): Promise<void> {
-      const data = await gql(`mutation($subjectId: ID!, $content: ReactionContent!) {
+      await mutation(context, `mutation($subjectId: ID!, $content: ReactionContent!) {
         addReaction(input: { subjectId: $subjectId, content: $content }) {
           reaction { content }
         }
-      }`, { subjectId, content }, context)
-      if (!data?.addReaction?.reaction) throw new GitHubProviderError('添加表情回应失败。')
+      }`, { subjectId, content }, data => data?.addReaction?.reaction, '添加表情回应失败。')
     },
 
     async removeReaction(context: DiscussionMutationContext, subjectId: string, content: string): Promise<void> {
-      const data = await gql(`mutation($subjectId: ID!, $content: ReactionContent!) {
+      await mutation(context, `mutation($subjectId: ID!, $content: ReactionContent!) {
         removeReaction(input: { subjectId: $subjectId, content: $content }) {
           reaction { content }
         }
-      }`, { subjectId, content }, context)
-      if (!data?.removeReaction?.reaction) throw new GitHubProviderError('移除表情回应失败。')
+      }`, { subjectId, content }, data => data?.removeReaction?.reaction, '移除表情回应失败。')
     },
   }
 
@@ -287,6 +356,21 @@ export function createGitHubDiscussionProvider(
 function requiredDiscussionId(context: DiscussionMutationContext): string {
   if (!context.discussionId) throw new GitHubProviderError('缺少 GitHub Discussion ID。')
   return context.discussionId
+}
+
+function collectCommentIds(comments: any[]): string[] {
+  const ids: string[] = []
+  forEachComment(comments, comment => {
+    if (typeof comment.id === 'string') ids.push(comment.id)
+  })
+  return ids
+}
+
+function forEachComment(comments: any[], callback: (comment: any) => void): void {
+  for (const comment of comments) {
+    callback(comment)
+    for (const reply of comment.replies?.nodes || []) callback(reply)
+  }
 }
 
 async function safeJson(response: Response): Promise<any> {

@@ -67,8 +67,8 @@ async function preparePage(page: Page, authenticated = false) {
     localStorage.clear()
     sessionStorage.clear()
     if (authenticated) {
-      sessionStorage.setItem('gh-token', 'test-token')
-      sessionStorage.setItem('gh-user', JSON.stringify({
+      localStorage.setItem('github-reader::ebook::auth::session', 'test-session')
+      localStorage.setItem('github-reader::ebook::auth::user', JSON.stringify({
         login: 'reader-one',
         avatar_url: 'https://avatars.githubusercontent.com/u/1?v=4',
         html_url: 'https://github.com/reader-one',
@@ -94,7 +94,17 @@ async function preparePage(page: Page, authenticated = false) {
     })
   })
 
-  await page.route('**/api/github/user', route => route.fulfill({
+  await page.route('**/api/auth/session', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      access_token: 'test-token',
+      expires_at: Date.now() + 8 * 60 * 60 * 1000,
+      session: 'test-session',
+    }),
+  }))
+
+  await page.route('https://api.github.com/user', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({
@@ -102,6 +112,21 @@ async function preparePage(page: Page, authenticated = false) {
       avatar_url: 'https://avatars.githubusercontent.com/u/1?v=4',
       html_url: 'https://github.com/reader-one',
     }),
+  }))
+
+  await page.route('https://api.github.com/graphql', async route => {
+    const payload = route.request().postDataJSON() as { query?: string }
+    if (payload.query?.includes('nodes(ids:')) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { nodes: [] } }) })
+      return
+    }
+    await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' })
+  })
+
+  await page.route('**/api/cache/invalidate', route => route.fulfill({
+    status: 202,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true }),
   }))
 }
 
@@ -254,13 +279,18 @@ test('GitHub 用户菜单支持点击、Escape 和键盘焦点恢复', async ({ 
 test('OAuth 用户信息暂时失败时保留会话并提供重试', async ({ page }) => {
   await page.addInitScript(() => {
     sessionStorage.setItem('github-reader::ebook::auth::oauth-state', 'state-ok')
+    sessionStorage.setItem('github-reader::ebook::auth::oauth-verifier', 'v'.repeat(43))
   })
   await page.route('http://127.0.0.1:15692/mock-worker/**', async route => {
-    if (route.request().url().includes('/api/auth')) {
+    if (route.request().url().includes('/api/auth/exchange')) {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ access_token: 'new-token' }),
+        body: JSON.stringify({
+          access_token: 'new-token',
+          expires_at: Date.now() + 8 * 60 * 60 * 1000,
+          session: 'new-session',
+        }),
       })
       return
     }
@@ -270,7 +300,7 @@ test('OAuth 用户信息暂时失败时保留会话并提供重试', async ({ pa
       body: JSON.stringify({ discussion: null, comments: [] }),
     })
   })
-  await page.route('**/api/github/user', route => route.fulfill({
+  await page.route('https://api.github.com/user', route => route.fulfill({
     status: 503,
     contentType: 'application/json',
     body: '{}',
@@ -280,7 +310,7 @@ test('OAuth 用户信息暂时失败时保留会话并提供重试', async ({ pa
   await expect(page.locator('.auth-retry-btn')).toBeVisible()
   await expect(page.getByText('GitHub 会话需要验证')).toBeVisible()
   await expect.poll(() => page.evaluate(() =>
-    sessionStorage.getItem('github-reader::ebook::auth::token'))).toBe('new-token')
+    localStorage.getItem('github-reader::ebook::auth::session'))).toBe('new-session')
 })
 
 test('匿名阅读页和笔记抽屉没有严重无障碍违规', async ({ page }) => {
@@ -316,16 +346,13 @@ test('新划词笔记以可读 schema v3 正文提交但不写入真实 GitHub',
   await preparePage(page, true)
   let submittedBody = ''
 
-  await page.route('**/api/github/graphql', async route => {
+  await page.unroute('https://api.github.com/graphql')
+  await page.route('https://api.github.com/graphql', async route => {
     const payload = route.request().postDataJSON() as {
       variables?: { body?: string }
-      cache?: { documentId?: string; categoryName?: string }
+      query?: string
     }
     submittedBody = payload.variables?.body || ''
-    expect(payload.cache).toMatchObject({
-      documentId: '/ebook/chapters/01-introduction.html',
-      categoryName: 'Ideas',
-    })
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -348,6 +375,8 @@ test('新划词笔记以可读 schema v3 正文提交但不写入真实 GitHub',
     })
   })
   await page.goto('chapters/01-introduction')
+  await expect(page.locator('.avatar-btn')).toBeVisible()
+  await expect(page.locator('.reader-anno[data-anno-ids~="note-1"]')).toBeVisible()
   await selectText(page, languageBlock('zh-CN'), '这是通用电子书模板')
   await page.getByRole('toolbar', { name: '划词操作' })
     .getByRole('button', { name: '添加笔记' })

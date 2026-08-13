@@ -1,9 +1,14 @@
 export interface WorkerSecrets {
   GITHUB_PAT?: string
-  GITHUB_CLIENT_ID?: string
-  GITHUB_CLIENT_SECRET?: string
-  GITHUB_CLIENT_ID_DEV?: string
-  GITHUB_CLIENT_SECRET_DEV?: string
+  AUTH_SESSION_SECRET?: string
+  GITHUB_AUTH_APP_CLIENT_ID?: string
+  GITHUB_AUTH_APP_CLIENT_SECRET?: string
+  GITHUB_READ_APP_ID?: string
+  GITHUB_READ_APP_PRIVATE_KEY?: string
+  GITHUB_READ_APP_INSTALLATION_ID?: string
+  GITHUB_WEBHOOK_SECRET?: string
+  GITHUB_REPOSITORY_ID?: string
+  CACHE_INVALIDATE_BUDGET?: string
 }
 
 export type WorkerEnv = Env & WorkerSecrets
@@ -41,19 +46,13 @@ export interface GitHubCommentNode {
   }
 }
 
-export type UserReactionMap = Record<string, Record<string, boolean>>
-
 export interface ReadRequest {
   pagePath: string
   categoryName: string
   knownId: string | null
-  userToken: string | null
-  force: boolean
 }
 
 export interface InvalidateRequest {
-  userToken: string | null
-  shared: boolean
   drop: boolean
 }
 
@@ -117,8 +116,3 @@ export interface ApiRequestBudget {
 export type ApiRequestAcquireResult =
   | { allowed: true; retryAt: 0; leaseId: string }
   | { allowed: false; retryAt: number; leaseId: null }
-
-export interface ReactionRecord {
-  reactions: UserReactionMap
-  expiresAt: number
-}

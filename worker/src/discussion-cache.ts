@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import { getWorkerConfig } from './config'
-import { fetchDiscussion, fetchUserReactions, GitHubRequestError } from './github'
+import { fetchDiscussion, GitHubRequestError } from './github'
+import { publicReadToken } from './github-app'
 import type {
   CacheReadResult,
   CacheRecord,
@@ -8,13 +9,9 @@ import type {
   DiscussionResult,
   GitHubCommentNode,
   InvalidateRequest,
-  ReactionRecord,
   ReadRequest,
-  UserReactionMap,
   WorkerEnv,
 } from './types'
-
-const REACTION_TTL_MS = 60 * 60 * 1000
 
 type DiscussionCacheRow = Record<string, SqlStorageValue> & {
   page_path: string
@@ -25,14 +22,8 @@ type DiscussionCacheRow = Record<string, SqlStorageValue> & {
   stale_until: number
 }
 
-type ReactionCacheRow = Record<string, SqlStorageValue> & {
-  reactions_json: string
-  expires_at: number
-}
-
 export class DiscussionCache extends DurableObject<WorkerEnv> {
   private refreshPromise: Promise<CacheRecord> | null = null
-  private reactionPromises = new Map<string, Promise<UserReactionMap>>()
 
   constructor(ctx: DurableObjectState, env: WorkerEnv) {
     super(ctx, env)
@@ -47,13 +38,7 @@ export class DiscussionCache extends DurableObject<WorkerEnv> {
           fresh_until INTEGER NOT NULL,
           stale_until INTEGER NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS reaction_cache (
-          token_hash TEXT PRIMARY KEY,
-          reactions_json TEXT NOT NULL,
-          expires_at INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_reaction_cache_expires_at
-          ON reaction_cache(expires_at);
+        DROP TABLE IF EXISTS reaction_cache;
       `)
     })
   }
@@ -67,22 +52,10 @@ export class DiscussionCache extends DurableObject<WorkerEnv> {
   }
 
   async invalidate(request: InvalidateRequest): Promise<{ invalidated: boolean }> {
-    if (request.userToken) {
-      const tokenHash = await hashToken(request.userToken)
-      this.ctx.storage.sql.exec(
-        'DELETE FROM reaction_cache WHERE token_hash = ?',
-        tokenHash,
-      )
-    }
-
-    if (request.shared) {
-      if (request.drop) {
-        this.ctx.storage.sql.exec('DELETE FROM discussion_cache WHERE id = 1')
-      } else {
-        this.ctx.storage.sql.exec(
-          'UPDATE discussion_cache SET fresh_until = 0 WHERE id = 1',
-        )
-      }
+    if (request.drop) {
+      this.ctx.storage.sql.exec('DELETE FROM discussion_cache WHERE id = 1')
+    } else {
+      this.ctx.storage.sql.exec('UPDATE discussion_cache SET fresh_until = 0 WHERE id = 1')
     }
     return { invalidated: true }
   }
@@ -92,7 +65,7 @@ export class DiscussionCache extends DurableObject<WorkerEnv> {
     let record = this.readCacheRecord()
     let cacheStatus: CacheResponse['cacheStatus'] = 'HIT'
 
-    if (request.force || !record || record.freshUntil <= requestedAt) {
+    if (!record || record.freshUntil <= requestedAt) {
       try {
         record = await this.refresh(request, record)
         cacheStatus = 'MISS'
@@ -108,23 +81,7 @@ export class DiscussionCache extends DurableObject<WorkerEnv> {
     }
 
     const result = structuredClone(record.result)
-    if (request.userToken && result.comments.length) {
-      try {
-        const reactionMap = await this.getUserReactions(request.userToken, result.comments)
-        overlayReactions(result.comments, reactionMap)
-      } catch (error) {
-        if (!isDegradableReactionError(error)) throw error
-        stripViewerReactions(result.comments)
-        log('warn', 'serving discussion without viewer reaction overlay', {
-          pagePath: request.pagePath,
-          categoryName: request.categoryName,
-          error: errorMessage(error),
-        })
-      }
-    } else {
-      stripViewerReactions(result.comments)
-    }
-
+    stripViewerReactions(result.comments)
     return {
       result,
       cacheStatus,
@@ -144,9 +101,7 @@ export class DiscussionCache extends DurableObject<WorkerEnv> {
   }
 
   private async doRefresh(request: ReadRequest, stale: CacheRecord | undefined): Promise<CacheRecord> {
-    const token = request.force && request.userToken
-      ? request.userToken
-      : this.env.GITHUB_PAT || request.userToken
+    const token = await publicReadToken(this.env)
     if (!token) {
       if (stale) throw new GitHubRequestError('GitHub API credentials are unavailable', 503)
       const empty = createCacheRecord(
@@ -233,72 +188,6 @@ export class DiscussionCache extends DurableObject<WorkerEnv> {
       record.staleUntil,
     )
   }
-
-  private async getUserReactions(token: string, comments: GitHubCommentNode[]): Promise<UserReactionMap> {
-    const tokenHash = await hashToken(token)
-    const now = Date.now()
-    this.ctx.storage.sql.exec('DELETE FROM reaction_cache WHERE expires_at <= ?', now)
-    const cached = this.readReactionRecord(tokenHash)
-    if (cached) return cached.reactions
-
-    const active = this.reactionPromises.get(tokenHash)
-    if (active) return active
-    const promise = this.fetchAndStoreUserReactions(tokenHash, token, comments)
-    this.reactionPromises.set(tokenHash, promise)
-    try {
-      return await promise
-    } finally {
-      if (this.reactionPromises.get(tokenHash) === promise) this.reactionPromises.delete(tokenHash)
-    }
-  }
-
-  private readReactionRecord(tokenHash: string): ReactionRecord | undefined {
-    const row = this.ctx.storage.sql.exec<ReactionCacheRow>(
-      `SELECT reactions_json, expires_at
-       FROM reaction_cache WHERE token_hash = ?`,
-      tokenHash,
-    ).toArray()[0]
-    if (!row) return undefined
-
-    try {
-      return {
-        reactions: JSON.parse(row.reactions_json) as UserReactionMap,
-        expiresAt: row.expires_at,
-      }
-    } catch (error) {
-      this.ctx.storage.sql.exec(
-        'DELETE FROM reaction_cache WHERE token_hash = ?',
-        tokenHash,
-      )
-      log('error', 'discarded corrupt reaction cache', { error: errorMessage(error) })
-      return undefined
-    }
-  }
-
-  private async fetchAndStoreUserReactions(
-    tokenHash: string,
-    token: string,
-    comments: GitHubCommentNode[],
-  ): Promise<UserReactionMap> {
-    const reactions = await fetchUserReactions(
-      this.env,
-      token,
-      collectSubjectIds(comments),
-      async () => {},
-    )
-    const expiresAt = Date.now() + REACTION_TTL_MS
-    this.ctx.storage.sql.exec(
-      `INSERT INTO reaction_cache (token_hash, reactions_json, expires_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT(token_hash) DO UPDATE SET
-         reactions_json = excluded.reactions_json,
-         expires_at = excluded.expires_at`,
-      tokenHash,
-      JSON.stringify(reactions),
-      expiresAt,
-    )
-    return reactions
-  }
 }
 
 function createCacheRecord(
@@ -325,45 +214,12 @@ function toSharedResult(result: DiscussionResult): DiscussionResult {
 }
 
 function stripViewerReactions(comments: GitHubCommentNode[]): void {
-  overlayReactions(comments, {})
-}
-
-function overlayReactions(comments: GitHubCommentNode[], reactionMap: UserReactionMap): void {
-  forEachCommentNode(comments, node => {
-    const reactions = reactionMap[node.id] || {}
-    for (const group of node.reactionGroups || []) {
-      group.viewerHasReacted = reactions[group.content] === true
-    }
-  })
-}
-
-function collectSubjectIds(comments: GitHubCommentNode[]): string[] {
-  const ids: string[] = []
-  forEachCommentNode(comments, node => ids.push(node.id))
-  return ids
-}
-
-function forEachCommentNode(
-  comments: GitHubCommentNode[],
-  callback: (node: GitHubCommentNode) => void,
-): void {
   for (const comment of comments) {
-    callback(comment)
-    for (const reply of comment.replies?.nodes || []) callback(reply)
+    for (const group of comment.reactionGroups || []) group.viewerHasReacted = false
+    for (const reply of comment.replies?.nodes || []) {
+      for (const group of reply.reactionGroups || []) group.viewerHasReacted = false
+    }
   }
-}
-
-async function hashToken(token: string): Promise<string> {
-  const data = new TextEncoder().encode(token)
-  const hash = await crypto.subtle.digest('SHA-256', data)
-  return Array.from(new Uint8Array(hash).slice(0, 16))
-    .map(byte => byte.toString(16).padStart(2, '0'))
-    .join('')
-}
-
-function isDegradableReactionError(error: unknown): boolean {
-  return error instanceof GitHubRequestError
-    && (error.status === 429 || error.status >= 500)
 }
 
 function serializeError(error: unknown): {

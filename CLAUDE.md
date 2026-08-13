@@ -15,7 +15,7 @@ This is a reusable VitePress/Vue ebook template.
 ## Reusable packages
 
 - `@github-reader/core`: provider/document contracts, annotation codecs, text anchors, and optimistic reactions.
-- `@github-reader/github`: Worker-backed GitHub GraphQL and `DiscussionProvider`.
+- `@github-reader/github`: shared Worker reads plus browser-direct GitHub GraphQL mutations.
 - `@github-reader/vitepress`: VitePress route/DOM `DocumentAdapter`.
 
 Keep generic packages independent of Vue, book content, product copy, and specific language codes.
@@ -69,17 +69,18 @@ Each canonical page/category pair maps to one GitHub Discussion. Languages on th
 - `Announcements`: readable legacy or publisher-created chapter threads.
 - `General`: newly created chapter threads.
 
-Reads and authenticated mutations use the Worker. Successful mutations invalidate the matching page/category Durable Object without exposing a public purge endpoint. Module-level state must remain keyed by canonical document ID.
+Public reads use the Worker. Authenticated GraphQL queries and mutations go directly from the browser to GitHub. Successful mutations send a tokenless, origin-checked invalidation hint; signed GitHub webhooks are the authoritative cache invalidation path. Module-level state must remain keyed by canonical document ID.
 
 ## Authentication and Worker
 
-`useAuth.ts` implements GitHub OAuth with state validation and session-scoped token storage. Never place client secrets or PAT values in `book.config.ts` or Vite environment variables.
+`useAuth.ts` implements GitHub App Web Flow with state validation, PKCE, in-memory access tokens and an encrypted opaque session in local storage. The Worker handles exchange/refresh/revoke but must not persist or log plaintext user tokens. Never place client secrets, private keys, session secrets or PAT values in `book.config.ts` or Vite environment variables.
 
 Worker trust boundaries are deployment variables:
 
 ```text
 REPO_OWNER
 REPO_NAME
+GITHUB_REPOSITORY_ID
 DOCUMENT_PATH_PREFIX
 DISCUSSION_CATEGORIES
 ALLOWED_ORIGINS
@@ -89,6 +90,7 @@ RATE_LIMIT_RESERVE
 GRAPHQL_SECONDARY_BUDGET
 REST_SECONDARY_BUDGET
 OAUTH_SECONDARY_BUDGET
+CACHE_INVALIDATE_BUDGET
 CONTENT_MINUTE_BUDGET
 CONTENT_HOUR_BUDGET
 GITHUB_CONCURRENCY_LIMIT
@@ -99,7 +101,7 @@ Deploy one single-tenant Worker per book unless a separate multi-tenant authoriz
 
 ## Security
 
-User Markdown is rendered with `marked` and sanitized by DOMPurify. Do not bypass `useMarkdown.ts` with unsanitized `v-html`. Keep origin, route, category and known Discussion validation in the Worker.
+User Markdown is rendered with `marked` and sanitized by DOMPurify. Do not bypass `useMarkdown.ts` with unsanitized `v-html`. Keep origin, route, category, known Discussion and webhook signature validation in the Worker. Never reintroduce a general-purpose user-token GraphQL proxy.
 
 ## Tests
 

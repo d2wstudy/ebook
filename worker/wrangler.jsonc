@@ -19,6 +19,7 @@
   "vars": {
     "REPO_OWNER": "d2wstudy",
     "REPO_NAME": "ebook",
+    "GITHUB_REPOSITORY_ID": "1330540843",
     "DOCUMENT_PATH_PREFIX": "/ebook/",
     "DISCUSSION_CATEGORIES": "Ideas,Announcements,General",
     "ALLOWED_ORIGINS": "https://d2wstudy.github.io,http://localhost:15689,http://127.0.0.1:15689",
@@ -28,6 +29,7 @@
     "GRAPHQL_SECONDARY_BUDGET": "1000",
     "REST_SECONDARY_BUDGET": "450",
     "OAUTH_SECONDARY_BUDGET": "50",
+    "CACHE_INVALIDATE_BUDGET": "120",
     "CONTENT_MINUTE_BUDGET": "60",
     "CONTENT_HOUR_BUDGET": "400",
     "GITHUB_CONCURRENCY_LIMIT": "80",

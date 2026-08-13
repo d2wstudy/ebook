@@ -33,8 +33,8 @@ export const githubDiscussionProvider = createGitHubDiscussionProvider(
     getToken() {
       return useAuth().token.value
     },
-    invalidate() {
-      useAuth().invalidate()
+    refresh() {
+      return useAuth().refreshToken()
     },
   },
 )

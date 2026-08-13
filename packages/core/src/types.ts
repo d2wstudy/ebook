@@ -125,7 +125,6 @@ export interface ReaderGitHubConfig {
   repo: string
   workerUrl: string
   oauthClientId?: string
-  oauthScope?: string
 }
 
 export interface ReaderDiscussionConfig {
