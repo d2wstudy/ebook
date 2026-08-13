@@ -82,7 +82,7 @@ onUnmounted(() => {
 
 <template>
   <div class="login-btn-wrapper">
-    <span v-if="loading" class="avatar-placeholder" />
+    <span v-if="loading && !user" class="avatar-placeholder" />
     <button
       v-else-if="!user && !isAuthenticated"
       type="button"
@@ -115,7 +115,9 @@ onUnmounted(() => {
         :src="user.avatar_url"
         :alt="user.login"
         class="user-avatar"
-        loading="lazy"
+        loading="eager"
+        decoding="sync"
+        fetchpriority="high"
         referrerpolicy="no-referrer"
         @error="onAvatarError"
       />

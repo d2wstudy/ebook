@@ -91,8 +91,11 @@ export function useAuth() {
       return
     }
 
-  if (readLocal(SESSION_KEY)) {
+    if (readLocal(SESSION_KEY)) {
       sessionPresent.value = true
+      const cachedUser = parseUser(readLocal(USER_KEY))
+      if (cachedUser) user.value = cachedUser
+
       void runLoading(async () => {
         const restored = await restoreAccessToken(false)
         if (restored) await fetchUserWithRefresh()

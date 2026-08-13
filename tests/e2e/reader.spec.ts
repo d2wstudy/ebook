@@ -261,6 +261,46 @@ test('360px 移动端登录控件不挤出导航栏', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
 
+test('刷新时立即显示缓存头像，不等待会话恢复', async ({ page }) => {
+  await preparePage(page, true)
+  await page.unroute('**/api/auth/session')
+
+  let releaseSession!: () => void
+  const sessionGate = new Promise<void>(resolve => { releaseSession = resolve })
+  await page.route('**/api/auth/session', async route => {
+    await sessionGate
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        access_token: 'test-token',
+        expires_at: Date.now() + 8 * 60 * 60 * 1000,
+        session: 'test-session',
+      }),
+    })
+  })
+  await page.route('https://avatars.githubusercontent.com/**', route => route.fulfill({
+    status: 200,
+    contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="16" fill="#0969da"/></svg>',
+  }))
+
+  const sessionRequest = page.waitForRequest('**/api/auth/session')
+  const navigation = page.goto('chapters/01-introduction')
+  await sessionRequest
+
+  try {
+    const avatar = page.locator('.avatar-btn')
+    await expect(avatar).toBeVisible({ timeout: 750 })
+    await expect(page.locator('.avatar-placeholder')).toHaveCount(0)
+    await expect(avatar.locator('img')).toHaveAttribute('loading', 'eager')
+    await expect(avatar.locator('img')).toHaveAttribute('fetchpriority', 'high')
+  } finally {
+    releaseSession()
+    await navigation
+  }
+})
+
 test('GitHub 用户菜单支持点击、Escape 和键盘焦点恢复', async ({ page }) => {
   await preparePage(page, true)
   await page.goto('chapters/01-introduction')
