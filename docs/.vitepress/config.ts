@@ -2,6 +2,11 @@ import { defineConfig } from 'vitepress'
 import container from 'markdown-it-container'
 import { bookConfig } from '../../book.config'
 import { bookGroups, bookLanguages, bookPages } from './bookContent'
+import {
+  processSearchTerm,
+  splitBookSearchSections,
+  tokenizeSearchText,
+} from './searchIndex'
 
 function sidebarItems(group: string) {
   return bookPages
@@ -66,7 +71,39 @@ export default defineConfig({
       { icon: 'github', link: `https://github.com/${bookConfig.github.owner}/${bookConfig.github.repo}` },
     ],
     outline: { level: [2, 3], label: '本页目录' },
-    search: { provider: 'local' },
+    search: {
+      provider: 'local',
+      options: {
+        translations: {
+          button: {
+            buttonText: '搜索',
+            buttonAriaLabel: '搜索全书',
+          },
+          modal: {
+            displayDetails: '显示详细结果',
+            resetButtonTitle: '清空搜索',
+            backButtonTitle: '关闭搜索',
+            noResultsText: '没有找到相关内容：',
+            footer: {
+              selectText: '选择',
+              selectKeyAriaLabel: '回车',
+              navigateText: '切换结果',
+              navigateUpKeyAriaLabel: '向上箭头',
+              navigateDownKeyAriaLabel: '向下箭头',
+              closeText: '关闭',
+              closeKeyAriaLabel: 'Escape',
+            },
+          },
+        },
+        miniSearch: {
+          options: {
+            tokenize: tokenizeSearchText,
+            processTerm: processSearchTerm,
+          },
+          _splitIntoSections: splitBookSearchSections,
+        },
+      },
+    },
   },
 
   markdown: {

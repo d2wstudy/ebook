@@ -205,6 +205,24 @@ test('自动发现语言、页面级切换和多语言划词可用', async ({ pa
   await expect(page.locator('.reader-anno[data-anno-ids~="note-1"]')).toBeVisible()
 })
 
+test('本地搜索自动索引中文和英文动态章节', async ({ page }) => {
+  await preparePage(page)
+  await page.goto('')
+
+  await page.getByRole('button', { name: '搜索全书' }).click()
+  const searchInput = page.locator('#localsearch-input')
+
+  await searchInput.fill('自动发现')
+  const chineseResult = page.locator('.VPLocalSearchBox .result').filter({ hasText: '引言' })
+  await expect(chineseResult).toBeVisible()
+  await expect(chineseResult).toHaveAttribute('href', /\/ebook\/chapters\/01-introduction\.html#引言$/)
+
+  await searchInput.fill('independent Markdown source')
+  const englishResult = page.locator('.VPLocalSearchBox .result').filter({ hasText: 'Content Model' })
+  await expect(englishResult).toBeVisible()
+  await expect(englishResult).toHaveAttribute('href', /\/ebook\/chapters\/02-content-model\.html#content-model$/)
+})
+
 test('页面缺少当前语言时回退到默认可用语言', async ({ page }) => {
   await preparePage(page)
   const response = await page.goto('chapters/02-content-model')

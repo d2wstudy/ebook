@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "dev": "vitepress dev docs --port 15689",
-    "build": "npm run generate:worker-documents && vitepress build docs",
+    "build": "npm run generate:worker-documents && vitepress build docs && npm run check:search-index",
     "preview": "vitepress preview docs",
     "setup": "node scripts/setup.mjs",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json && tsc --noEmit -p worker/tsconfig.json && tsc --noEmit -p tests/tsconfig.worker.json",
@@ -19,6 +19,7 @@
     "setup:rollback": "node scripts/setup.mjs --rollback",
     "setup:cleanup": "node scripts/setup.mjs --cleanup",
     "generate:worker-documents": "node scripts/generate-worker-documents.mjs",
+    "check:search-index": "node scripts/check-search-index.mjs",
     "check:worker-types": "wrangler types --check worker/worker-configuration.d.ts --config worker/wrangler.jsonc",
     "check:worker": "npm run generate:worker-documents && npm run check:worker-types && wrangler deploy --dry-run --config worker/wrangler.jsonc --outdir .wrangler-dry-run",
     "check:setup": "node --check scripts/setup.mjs",

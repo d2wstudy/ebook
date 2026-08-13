@@ -35,6 +35,16 @@ npm run build
 npm run preview
 ```
 
+`npm run build` 会自动扫描 `content/**`，为所有动态章节和语言生成 VitePress 本地搜索索引，并检查索引非空、覆盖全部章节及输出 gzip 体积。索引随静态文件一起发布到 GitHub Pages，无需 Algolia 或搜索服务器。
+
+也可以对现有构建产物单独执行检查：
+
+```powershell
+npm run check:search-index
+```
+
+默认在索引 gzip 体积超过 5 MB 时给出警告。仓库自带的 GitHub Pages 工作流会在超过 10 MB 时停止发布；也可以通过 `SEARCH_INDEX_WARN_GZIP_KB` 和 `SEARCH_INDEX_MAX_GZIP_KB` 调整阈值。
+
 ## 创建自己的电子书
 
 ### 1. 修改书籍配置
@@ -135,6 +145,7 @@ npm run setup
 | `npm run preview` | 预览生产构建 |
 | `npm run setup` | 配置 GitHub、Worker 和 Pages 变量 |
 | `npm run setup:doctor` | 诊断部署配置与 Worker 连通性 |
+| `npm run check:search-index` | 检查搜索索引覆盖范围和压缩体积 |
 | `npm run typecheck` | 执行 TypeScript / Vue 类型检查 |
 | `npm test` | 执行 Vitest 单元测试 |
 | `npm run test:worker` | 在 Workers runtime 中执行测试 |

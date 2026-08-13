@@ -9,7 +9,7 @@ on:
       - 'content/**'
       - 'docs/**'
       - 'packages/**'
-      - 'scripts/generate-worker-documents.mjs'
+      - 'scripts/**'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
@@ -52,7 +52,11 @@ jobs:
             echo "VITE_GITHUB_CLIENT_ID=$CONFIG_GITHUB_CLIENT_ID" >> "$GITHUB_ENV"
           fi
 
-      - run: npm run build
+      - name: Build site and validate search index
+        run: npm run build
+        env:
+          SEARCH_INDEX_WARN_GZIP_KB: '5120'
+          SEARCH_INDEX_MAX_GZIP_KB: '10240'
 
       - uses: actions/upload-pages-artifact@v3
         with:
