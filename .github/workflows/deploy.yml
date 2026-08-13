@@ -3,6 +3,16 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+    paths:
+      - '.github/workflows/deploy.yml'
+      - 'book.config.ts'
+      - 'content/**'
+      - 'docs/**'
+      - 'packages/**'
+      - 'scripts/generate-worker-documents.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
   workflow_dispatch:
 
 permissions:
