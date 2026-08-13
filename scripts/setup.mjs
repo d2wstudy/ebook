@@ -25,6 +25,7 @@ const setupDir = resolve(rootDir, '.setup')
 const statePath = join(setupDir, 'state.json')
 const backupDir = join(setupDir, 'backups')
 const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const args = new Set(process.argv.slice(2))
 
 function readWindowsProxy() {
@@ -686,7 +687,7 @@ async function applySetup(state, options, runtime = {}) {
     } else {
       await verifyWorker(state)
     }
-    commandResult('npm', ['run', 'build'])
+    commandResult(npmCommand, ['run', 'build'])
     saveCompletion(state, 'verification')
   }
 }
