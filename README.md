@@ -112,15 +112,35 @@ export const bookConfig = {
 
 Worker 是所有 GitHub API 调用的服务端代理：匿名读取、登录用户读取、GraphQL mutation、用户资料、OAuth token exchange 和 revoke 都不会由浏览器直连 GitHub。每本书默认部署一个 Cloudflare Worker，GitHub Client Secret 和 PAT 只保存在 Cloudflare 中。
 
+### 选择配置方式
+
+| 方式 | 适用场景 | 配置入口 |
+| --- | --- | --- |
+| 自动配置（推荐） | 首次部署、迁移到新仓库或希望由向导完成检查和同步 | `npm run setup` |
+| 手动配置 | 无法运行向导，或需要逐项控制 GitHub、Cloudflare 和本地配置 | 按“手动配置”中的 6 个步骤操作 |
+
+两种方式最终会生成相同的配置。自动配置完成后，不需要再重复执行手动配置；如果向导中途失败，重新运行即可从未完成的阶段继续。
+
 ### 自动配置（推荐）
 
-首次配置可以直接执行：
+#### 前置条件
+
+- 已安装 Node.js 20 或更高版本，并执行过 `npm ci`。
+- 已安装 GitHub CLI（`gh`）。
+- 当前仓库已配置 GitHub remote，并且当前 GitHub 账号拥有仓库 admin 权限。
+- 已准备可用于部署 Worker 的 Cloudflare 账号。
+
+Cloudflare Wrangler 会通过 `npx` 自动获取，不需要全局安装。Windows 如果启用了系统代理，向导会在未设置 `HTTP_PROXY`/`HTTPS_PROXY` 时自动读取代理地址；也可以手动设置这两个环境变量覆盖自动检测。
+
+#### 运行向导
+
+首次配置直接执行：
 
 ```powershell
 npm run setup
 ```
 
-向导会从当前 Git remote 推导 GitHub owner 和 repository，按回车即可使用默认值。它会依次：
+向导会从当前 Git remote 推导 GitHub owner 和 repository，按回车即可采用默认值。随后会依次：
 
 1. 检查 Cloudflare 登录状态，必要时打开浏览器完成授权。
 2. 检查 GitHub admin 权限，并自动启用 Discussions 和 Workflow 类型 Pages。
@@ -132,21 +152,32 @@ npm run setup
 8. 验证 Worker CORS、Discussion 接口和本地构建。
 9. 最后询问是否提交并推送配置。
 
-脚本不会把 PAT 或 OAuth Client Secret 写入文件。状态文件只记录阶段是否完成，不记录 Secret 内容，并保存在被 Git 忽略的 `.setup/` 目录中。中途失败后再次执行 `npm run setup` 会从未完成阶段继续；Worker 最后验证遇到网络超时会自动重试一次，仍失败时不会重复部署或写入 Secret。确认本机可以访问 `workers.dev` 后再次执行即可。如果要修改已完成配置或轮换 Secret，执行：
+#### 向导中的人工确认
+
+以下操作受 GitHub API 限制，向导会打开对应页面并等待确认：
+
+- 创建 GitHub OAuth App，并填写向导显示的 callback URL。创建后将 Client ID 粘贴回向导，后续配置会自动完成。
+- 当 `Ideas`、`Announcements` 或 `General` Discussion 分类缺失时，由仓库管理员在设置页中创建；向导随后会自动重新检查。
+
+#### 重新配置与故障恢复
+
+脚本不会把 PAT 或 OAuth Client Secret 写入文件。状态文件只记录阶段是否完成，不记录 Secret 内容，并保存在被 Git 忽略的 `.setup/` 目录中。
+
+中途失败后，再次执行 `npm run setup` 会从未完成的阶段继续。Worker 最后验证遇到网络超时时会自动重试一次；仍然失败时，不会重复部署或写入 Secret。确认本机可以访问 `workers.dev` 后重新运行即可。
+
+如果要修改已完成的配置或轮换 Secret，执行：
 
 ```powershell
 npm run setup -- --reconfigure
 ```
 
-如果本机网络无法访问 `workers.dev`，前面的配置和部署仍可能已经完成。此时可以使用下面的选项只跳过最后的线上连通性验证；它不会跳过本地配置检查、构建、Secret 或 Actions Variables 配置，之后可用 `npm run setup:doctor` 重试线上检查：
+如果本机网络无法访问 `workers.dev`，可以只跳过最后的线上连通性验证。该选项不会跳过本地配置检查、构建、Secret 或 Actions Variables 配置；之后可用 `npm run setup:doctor` 重试线上检查：
 
 ```powershell
 npm run setup -- --skip-verification
 ```
 
-GitHub OAuth App 仍需在打开的 GitHub 页面中创建，并将向导显示的 callback URL 填入 OAuth App；GitHub 没有公开的 OAuth App 创建 API。Client ID 可以粘贴回向导，之后由脚本自动完成其余配置。GitHub Discussion 分类同样需要在缺失时由管理员在网页中创建，向导会自动重新检查。
-
-管理员常用命令：
+其他维护命令：
 
 ```powershell
 npm run setup -- --plan       # 只查看变更计划，不写文件、不部署
@@ -157,11 +188,13 @@ npm run setup:cleanup         # 显式删除当前状态对应的 Worker 和 Act
 
 `rollback` 不会自动恢复旧 Secret；`cleanup` 不会自动撤销 PAT 或 OAuth 凭证，需要在 GitHub/Cloudflare 中单独处理。当前 Pages 工作流要求存在 `VITE_WORKER_URL`，发布到 GitHub Pages 时不要跳过 Actions Variables 同步。启用 Discussions 和 Pages 需要仓库 admin 权限。
 
-运行向导前请确保已安装 GitHub CLI（`gh`）。Cloudflare Wrangler 会通过 `npx` 自动获取，不需要全局安装。Windows 如果启用了系统代理，向导会在未设置 `HTTP_PROXY`/`HTTPS_PROXY` 时自动读取代理地址；也可以手动设置这两个环境变量覆盖自动检测。
+### 手动配置
 
-### 1. 准备 GitHub 仓库
+仅在不使用自动向导时执行下面的步骤。请按顺序完成 GitHub 仓库、Worker、前端和 OAuth 配置。
 
-自动向导会通过 GitHub API 启用 Discussions，并检查 Pages 是否为 Workflow 模式。手动配置时可在目标仓库的 `Settings > General > Features` 中启用 Discussions。以下分类由 Worker 使用：
+#### 1. 准备 GitHub 仓库
+
+在目标仓库的 `Settings > General > Features` 中启用 Discussions，并确认 GitHub Pages 使用 GitHub Actions（Workflow）部署。以下分类由 Worker 使用：
 
 - `Ideas`：划词标注使用；GitHub 启用 Discussions 时默认创建。
 - `Announcements`：公告读取使用。
@@ -169,7 +202,7 @@ npm run setup:cleanup         # 显式删除当前状态对应的 Worker 和 Act
 
 如需让未登录用户也能读取讨论，创建一个只授权目标仓库的 fine-grained personal access token，并授予 `Discussions: Read-only`。这个 token 后续保存为 Worker 的 `GITHUB_PAT` secret，不能写入代码或提交到 Git。
 
-### 2. 配置 Worker 部署变量
+#### 2. 配置 Worker 部署变量
 
 在 `worker/wrangler.jsonc` 中配置当前书籍。以本仓库为例：
 
@@ -208,7 +241,7 @@ npm run setup:cleanup         # 显式删除当前状态对应的 Worker 和 Act
 
 限额保护由 Worker 统一完成，而不是依赖前端节流：主配额按 token 全局协调并保留 `RATE_LIMIT_RESERVE`；GraphQL query 每次计 1 point、mutation 每次计 5 points；REST `GET/HEAD/OPTIONS` 计 1 point，其他方法计 5 points；OAuth 使用独立滚动窗口。同一仓库的 REST/GraphQL 还共享并发 lease、内容生成分钟/小时滚动预算和 mutative request 最小间隔，所有约束都在请求到达 GitHub 前原子判定，超限直接返回 `429`。GitHub 返回的 `X-RateLimit-*`、`Retry-After` 和 secondary rate limit 也会写入 `RateLimitCoordinator`，用于后续熔断。
 
-### 3. 部署并获得 Worker URL
+#### 3. 部署并获得 Worker URL
 
 需要一个 Cloudflare 账号。首次部署时 Wrangler 会打开浏览器完成登录授权：
 
@@ -233,7 +266,7 @@ npx wrangler secret put GITHUB_PAT
 npx wrangler deploy
 ```
 
-### 4. 配置前端 Worker URL
+#### 4. 配置前端 Worker URL
 
 将部署得到的地址写入 `book.config.ts`：
 
@@ -260,7 +293,7 @@ VITE_GITHUB_REPO_OWNER=your-account
 VITE_GITHUB_REPO_NAME=my-book
 ```
 
-### 5. 配置 GitHub OAuth（登录和写操作）
+#### 5. 配置 GitHub OAuth（登录和写操作）
 
 只阅读电子书不需要 OAuth。若要支持登录、发表评论、创建标注和 Reaction，在 GitHub 的 `Settings > Developer settings > OAuth Apps` 中创建 OAuth App。本仓库填写：
 
@@ -280,7 +313,7 @@ npx wrangler deploy
 
 `GITHUB_CLIENT_SECRET` 只能存在于 Worker secrets。`GITHUB_CLIENT_ID` 本身是公开值，前端构建也需要它：在 GitHub 仓库 `Settings > Secrets and variables > Actions > Variables` 中添加 `VITE_GITHUB_CLIENT_ID`。当前 Pages 工作流会在构建时自动读取该变量。本地开发则把它写入 `docs/.env.development.local`。
 
-### 6. 验证 Worker
+#### 6. 验证 Worker
 
 先验证 CORS 预检。PowerShell 中应使用 `curl.exe`，避免调用 `Invoke-WebRequest` 别名：
 
