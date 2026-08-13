@@ -94,7 +94,7 @@ async function preparePage(page: Page, authenticated = false) {
     })
   })
 
-  await page.route('https://api.github.com/user', route => route.fulfill({
+  await page.route('**/api/github/user', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({
@@ -270,7 +270,7 @@ test('OAuth 用户信息暂时失败时保留会话并提供重试', async ({ pa
       body: JSON.stringify({ discussion: null, comments: [] }),
     })
   })
-  await page.route('https://api.github.com/user', route => route.fulfill({
+  await page.route('**/api/github/user', route => route.fulfill({
     status: 503,
     contentType: 'application/json',
     body: '{}',
@@ -316,9 +316,16 @@ test('新划词笔记以可读 schema v3 正文提交但不写入真实 GitHub',
   await preparePage(page, true)
   let submittedBody = ''
 
-  await page.route('https://api.github.com/graphql', async route => {
-    const payload = route.request().postDataJSON() as { variables?: { body?: string } }
+  await page.route('**/api/github/graphql', async route => {
+    const payload = route.request().postDataJSON() as {
+      variables?: { body?: string }
+      cache?: { documentId?: string; categoryName?: string }
+    }
     submittedBody = payload.variables?.body || ''
+    expect(payload.cache).toMatchObject({
+      documentId: '/ebook/chapters/01-introduction.html',
+      categoryName: 'Ideas',
+    })
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -340,12 +347,6 @@ test('新划词笔记以可读 schema v3 正文提交但不写入真实 GitHub',
       }),
     })
   })
-  await page.route('**/api/cache/purge?*', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({ ok: true }),
-  }))
-
   await page.goto('chapters/01-introduction')
   await selectText(page, languageBlock('zh-CN'), '这是通用电子书模板')
   await page.getByRole('toolbar', { name: '划词操作' })

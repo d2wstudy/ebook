@@ -36,6 +36,8 @@
 | Token 长期保存在 localStorage | 令牌在浏览器重启后仍存在，扩大 XSS 暴露窗口 | 改为 sessionStorage，并迁移、删除旧 localStorage 数据 |
 | Worker 已知 ID 未验证页面 | 传入 ID 后直接读取 Node，忽略 path/category | Worker 校验 Discussion 标题和分类，不匹配时重新搜索 |
 | GitHub API 错误被显示成空评论 | 前端和 Worker 多处吞掉网络/GraphQL 错误 | 改为结构化错误、重试提示，失败响应不再写成空缓存 |
+| GitHub API 调用上限缺少全局协调 | 页面缓存、登录查询和 mutation 分散计数，无法防止突发触发 primary/secondary limit | SQLite `RateLimitCoordinator` 按 token 保护主配额并保留 reserve；按仓库原子协调 GraphQL/REST secondary points、共享并发 lease、内容生成双滚动窗口及 mutative request 最小间隔；OAuth 独立滚动计数；GraphQL mutation 与 REST 写方法按 5 points 计费 |
+| Discussion 缓存使用 Durable Object KV 单值 | 大线程存在单值尺寸风险，且缓存状态难以直接核验 | 改为 SQLite 表保存 shared discussion 和按 token hash 的 Reaction overlay |
 | Reaction 乐观更新不能回滚 | 本地先修改，GraphQL 失败后不恢复 | 增加操作锁、快照和失败回滚 |
 | 同页重复加载可能永久停在 loading | 去重后的同一 Promise 被后一次请求序列判定为过期，唯一负责收尾的调用无法落状态 | 评论和标注加载为每个调用保留序列，既复用网络请求，也能正确结束当前页面状态 |
 | 异步 mutation 可能写回已经离开的页面 | 创建、编辑或删除完成后直接修改当前模块状态 | mutation 完成前后校验标准化页面键，旧页面结果不再污染新路由 |
@@ -77,6 +79,7 @@
 - GitHub provider 改用通用 `documentId`，不再依赖 VitePress route 或双语 DOM；`AnnotationLayer.vue` 不再直接查询 `.bilingual-*`。
 - 新 annotation 使用 GitHub 中可直接阅读的 schema v3 Markdown，同时保持 schema v1/v2 JSON 兼容；编辑旧笔记时可自然升级。
 - Worker 的仓库、路径前缀、Discussion 分类和 Origin 改为部署变量，并校验已知 Discussion 确实属于配置仓库；客户端不能动态选择 owner/repo。
+- 所有 GitHub API 调用统一经 Worker；精确页面白名单、SQLite fresh/stale cache、并发 single-flight、主配额 reserve、secondary points、共享并发 lease、内容生成双窗口与写请求间隔均在回源前生效。
 - 新增 [REUSABLE-SYSTEM.md](./REUSABLE-SYSTEM.md)，记录其他电子书的配置、适配、稳定 ID、Worker 和迁移边界。
 - 更新 `CLAUDE.md`，删除已废弃且未使用的 `NoteBlock.vue`、`NoteEditor.vue`。
 - 新增 `vue-tsc`、Vitest、happy-dom、`tsconfig.json` 和统一 `npm run check`。
@@ -91,7 +94,7 @@
 
 ### 上线前必须完成
 
-1. **部署新版 Worker。** 前端兼容旧 Worker 的读取结构，但新的 CORS、分页、ID 校验和错误处理只有部署后才生效。
+1. **部署新版 Worker。** 新前端不再兼容旧 Worker；必须同步部署包含 Durable Object migrations、页面白名单、GitHub API 代理和配额协调的新版本。
 2. **使用真实普通账号回归。** 需要验证首次创建 `General` 章节 Discussion、Notes Discussion、编辑、删除、回复、全部 Reaction 和 OAuth 撤销。
 3. **确认 GitHub OAuth App 回调配置。** 生产和开发 Client ID、callback URL、Worker secrets 必须与 README 一致。
 4. **为大量内容确定永久段落 ID。** `DocumentAdapter` 已支持稳定 ID 和 legacy ID，但当前书仍使用 hash + quote 重定位；在全书发布前，建议在 Markdown 中引入显式、不可变的段落 ID。
@@ -99,11 +102,11 @@
 ### 中期改进
 
 1. Worker 每条评论最多读取前 100 个回复。极端长线程需要增加回复游标分页或按需加载。
-2. 前端仍直接持有 GitHub OAuth token。`sessionStorage` 已降低风险，但更强的架构是把所有 mutation 也代理到 Worker，并使用服务端会话/httpOnly cookie。
+2. 前端仍持有 GitHub OAuth token，但所有读取和 mutation 已经代理到 Worker；进一步收敛风险需要改为服务端会话/httpOnly cookie。
 3. 当前 OAuth 请求使用较宽的 `public_repo` scope；GitHub OAuth App 没有 Discussions-only 的公开仓库写 scope。应持续在登录说明中披露，并评估 GitHub App 或服务端会话。
 4. 编辑采用最后写入者覆盖，没有冲突检测。可以利用 `lastEditedAt` 做乐观并发控制提示。
 5. GitHub 的最小化评论、举报、锁定 Discussion、置顶和 Q&A answer 等管理能力仍主要通过“在 GitHub 查看”完成。
-6. 自动化 E2E 使用模拟只读 API，仍没有带真实 GitHub 登录和 mutation 的浏览器测试。
+6. 自动化 E2E 已覆盖模拟 Worker mutation，但仍没有带真实 GitHub 登录和真实仓库 mutation 的浏览器测试。
 7. 全书原始素材包含至少数百个 NUL/OCR 异常和大量外链图片，需要独立清洗流水线、资源归档和版权检查。
 
 ### 依赖残余
@@ -128,9 +131,9 @@ npm audit --registry=https://registry.npmjs.org
 git diff --check
 ```
 
-本轮浏览器基线包含 7 项 Playwright 场景，已经覆盖三种语言模式、中英文划词、双语混选拒绝、笔记深链接、八种 Reaction、schema v3 mutation 正文、360px 抽屉、焦点约束、匿名抽屉与登录态编辑器的 axe 扫描；当前 serious/critical 无障碍违规为 0。桌面与 360px 移动截图也已人工核对，抽屉没有横向溢出，层级和操作区保持可用。
+本轮浏览器基线包含 10 项 Playwright 场景，覆盖语言发现与回退、多语言划词、笔记深链接、八种 Reaction、OAuth 临时失败恢复、schema v3 Worker mutation、360px 抽屉、焦点约束、匿名抽屉与登录态编辑器的 axe 扫描；当前 serious/critical 无障碍违规为 0。
 
-2026-08-06 重构后本地核验：`npm run check` 通过（10 个 Vitest 文件、30 项测试、Worker 语法和 VitePress 构建），`npm run test:e2e` 7/7 通过，`git diff --check` 通过；完整 `npm audit` 仍为 3 项开发链公告（2 moderate、1 high），`npm audit --omit=dev` 为 0。未发布 npm、未部署 Worker、未 push，也未写入真实 GitHub 数据。
+2026-08-13 GitHub API/Worker 重构后本地核验：`npm run check` 通过（32 项普通 Vitest、9 项 Workers runtime、Wrangler types、deploy dry-run 与 VitePress build），`npm run test:e2e` 10/10 通过，`git diff --check` 通过；完整 `npm audit` 仍为 3 项开发链公告（2 moderate、1 high），`npm audit --omit=dev` 为 0。未发布 npm、未部署 Worker、未 push，也未写入真实 GitHub 数据。
 
 交互回归应覆盖：
 

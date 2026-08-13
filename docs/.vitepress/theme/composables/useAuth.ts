@@ -226,7 +226,7 @@ export function useAuth() {
     if (!token.value) return false
 
     try {
-      const resp = await fetchWithTimeout('https://api.github.com/user', {
+      const resp = await fetchWithTimeout(`${WORKER_URL}/api/github/user`, {
         headers: { Authorization: `Bearer ${token.value}` },
       })
 

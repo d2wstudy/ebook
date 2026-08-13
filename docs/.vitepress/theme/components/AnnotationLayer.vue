@@ -8,7 +8,6 @@ import {
   type AnnotationAnchor,
   type AnnotationThread,
 } from '../composables/useAnnotations'
-import { purgeWorkerCache } from '../composables/useGithubGql'
 import {
   captureSelector,
   createContentTextWalker,
@@ -407,15 +406,7 @@ async function onDrawerReply(threadId: string, body: string) {
 }
 
 async function onDrawerReact(subjectId: string, content: string) {
-  const result = await toggleReaction(subjectId, content)
-  if (!result || !discussion.value) return
-  await purgeWorkerCache(
-    route.path,
-    discussion.value.category,
-    true,
-    { subjectId, content, delta: result.delta },
-    discussion.value.id,
-  )
+  await toggleReaction(subjectId, content)
 }
 
 async function onDrawerEdit(subjectId: string, body: string) {

@@ -1,0 +1,48 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "ebook-reader-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [
+      { "name": "DISCUSSION_CACHE", "class_name": "DiscussionCache" },
+      { "name": "GITHUB_RATE_LIMIT", "class_name": "RateLimitCoordinator" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["DiscussionCache"] },
+    { "tag": "v2", "new_sqlite_classes": ["RateLimitCoordinator"] }
+  ],
+  "vars": {
+    "REPO_OWNER": "d2wstudy",
+    "REPO_NAME": "ebook",
+    "DOCUMENT_PATH_PREFIX": "/ebook/",
+    "DISCUSSION_CATEGORIES": "Ideas,Announcements,General",
+    "ALLOWED_ORIGINS": "https://d2wstudy.github.io,http://localhost:15689,http://127.0.0.1:15689",
+    "CACHE_FRESH_TTL": "600",
+    "CACHE_STALE_TTL": "86400",
+    "RATE_LIMIT_RESERVE": "250",
+    "GRAPHQL_SECONDARY_BUDGET": "1000",
+    "REST_SECONDARY_BUDGET": "450",
+    "OAUTH_SECONDARY_BUDGET": "50",
+    "CONTENT_MINUTE_BUDGET": "60",
+    "CONTENT_HOUR_BUDGET": "400",
+    "GITHUB_CONCURRENCY_LIMIT": "80",
+    "MUTATION_MIN_INTERVAL_MS": "1000"
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.05
+    }
+  }
+}

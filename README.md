@@ -110,7 +110,7 @@ export const bookConfig = {
 
 ## GitHub 与 Worker
 
-Worker 是 GitHub OAuth、Discussion 匿名读取和缓存失效的服务端代理。每本书默认部署一个 Cloudflare Worker，浏览器使用公开的 Worker URL 调用它，GitHub Client Secret 和 PAT 只保存在 Cloudflare 中。
+Worker 是所有 GitHub API 调用的服务端代理：匿名读取、登录用户读取、GraphQL mutation、用户资料、OAuth token exchange 和 revoke 都不会由浏览器直连 GitHub。每本书默认部署一个 Cloudflare Worker，GitHub Client Secret 和 PAT 只保存在 Cloudflare 中。
 
 ### 自动配置（推荐）
 
@@ -125,7 +125,7 @@ npm run setup
 1. 检查 Cloudflare 登录状态，必要时打开浏览器完成授权。
 2. 检查 GitHub admin 权限，并自动启用 Discussions 和 Workflow 类型 Pages。
 3. 检查 `Ideas`、`Announcements`、`General` 分类；GitHub 默认会创建这些分类，缺失时才打开设置页等待管理员补充。
-4. 更新 `book.config.ts` 和 `worker/wrangler.toml`。
+4. 更新 `book.config.ts` 和 `worker/wrangler.jsonc`，并生成 Worker 页面白名单。
 5. 部署 Worker，并自动解析 `workers.dev` URL。
 6. 通过 Wrangler 交互式保存 `GITHUB_PAT`、OAuth Client ID 和 Client Secret。
 7. 写入本地 `docs/.env.development.local`，并同步 GitHub Actions Variables。
@@ -171,23 +171,42 @@ npm run setup:cleanup         # 显式删除当前状态对应的 Worker 和 Act
 
 ### 2. 配置 Worker 部署变量
 
-在 `worker/wrangler.toml` 中配置当前书籍。以本仓库为例：
+在 `worker/wrangler.jsonc` 中配置当前书籍。以本仓库为例：
 
-```toml
-name = "ebook-reader-worker"
-main = "index.js"
-compatibility_date = "2024-01-01"
-workers_dev = true
-
-[vars]
-REPO_OWNER = "d2wstudy"
-REPO_NAME = "ebook"
-DOCUMENT_PATH_PREFIX = "/ebook/"
-DISCUSSION_CATEGORIES = "Ideas,Announcements,General"
-ALLOWED_ORIGINS = "https://d2wstudy.github.io,http://localhost:15689,http://127.0.0.1:15689"
+```jsonc
+{
+  "name": "ebook-reader-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-13",
+  "durable_objects": {
+    "bindings": [
+      { "name": "DISCUSSION_CACHE", "class_name": "DiscussionCache" },
+      { "name": "GITHUB_RATE_LIMIT", "class_name": "RateLimitCoordinator" }
+    ]
+  },
+  "vars": {
+    "REPO_OWNER": "d2wstudy",
+    "REPO_NAME": "ebook",
+    "DOCUMENT_PATH_PREFIX": "/ebook/",
+    "DISCUSSION_CATEGORIES": "Ideas,Announcements,General",
+    "ALLOWED_ORIGINS": "https://d2wstudy.github.io,http://localhost:15689,http://127.0.0.1:15689",
+    "CACHE_FRESH_TTL": "600",
+    "CACHE_STALE_TTL": "86400",
+    "RATE_LIMIT_RESERVE": "250",
+    "GRAPHQL_SECONDARY_BUDGET": "1000",
+    "REST_SECONDARY_BUDGET": "450",
+    "OAUTH_SECONDARY_BUDGET": "50",
+    "CONTENT_MINUTE_BUDGET": "60",
+    "CONTENT_HOUR_BUDGET": "400",
+    "GITHUB_CONCURRENCY_LIMIT": "80",
+    "MUTATION_MIN_INTERVAL_MS": "1000"
+  }
+}
 ```
 
-`DOCUMENT_PATH_PREFIX` 必须与 `book.config.ts` 的 `base` 一致。`ALLOWED_ORIGINS` 只填写 Origin，不包含 `/ebook/` 路径。
+`DOCUMENT_PATH_PREFIX` 必须与 `book.config.ts` 的 `base` 一致。`ALLOWED_ORIGINS` 只填写 Origin，不包含 `/ebook/` 路径。构建和部署前会从 `content/` 自动生成精确页面白名单，未知路径不会调用 GitHub API。
+
+限额保护由 Worker 统一完成，而不是依赖前端节流：主配额按 token 全局协调并保留 `RATE_LIMIT_RESERVE`；GraphQL query 每次计 1 point、mutation 每次计 5 points；REST `GET/HEAD/OPTIONS` 计 1 point，其他方法计 5 points；OAuth 使用独立滚动窗口。同一仓库的 REST/GraphQL 还共享并发 lease、内容生成分钟/小时滚动预算和 mutative request 最小间隔，所有约束都在请求到达 GitHub 前原子判定，超限直接返回 `429`。GitHub 返回的 `X-RateLimit-*`、`Retry-After` 和 secondary rate limit 也会写入 `RateLimitCoordinator`，用于后续熔断。
 
 ### 3. 部署并获得 Worker URL
 
@@ -283,7 +302,7 @@ Access-Control-Allow-Origin: https://d2wstudy.github.io
 curl.exe "https://ebook-reader-worker.<your-workers-subdomain>.workers.dev/api/discussions?path=%2Febook%2Fchapters%2F01-introduction.html&category=General"
 ```
 
-Worker 的仓库、页面路径前缀、Discussion 分类和允许 Origin 由部署变量固定，不能由浏览器请求动态选择仓库。修改 `worker/wrangler.toml` 或 Worker secrets 后需要重新执行 `npx wrangler deploy`。
+Worker 的仓库、页面路径前缀、Discussion 分类和允许 Origin 由部署变量固定，不能由浏览器请求动态选择仓库。Discussion 读取使用按页面和分类分片的 SQLite Durable Object，完成持久 fresh/stale 缓存、同对象冷请求 single-flight 和登录用户 Reaction overlay；`RateLimitCoordinator` 按 token 协调主配额，并全局原子协调 REST/GraphQL secondary points、共享并发、内容生成预算与写请求间隔。mutation 成功后只把对应缓存标记为 stale，失效失败也不会把已成功的 GitHub mutation 返回成失败。修改 `worker/wrangler.jsonc` 或 Worker secrets 后需要重新执行 `npx wrangler deploy`。
 
 ## 目录结构
 

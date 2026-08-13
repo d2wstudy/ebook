@@ -12,6 +12,9 @@ docs/.vitepress/dist
 docs/.env.local
 docs/.env.*.local
 .setup/
+.wrangler/
+.wrangler-dry-run/
+worker/.wrangler/
 
 # OS
 .DS_Store

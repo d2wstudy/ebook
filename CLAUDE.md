@@ -15,7 +15,7 @@ This is a reusable VitePress/Vue ebook template.
 ## Reusable packages
 
 - `@github-reader/core`: provider/document contracts, annotation codecs, text anchors, and optimistic reactions.
-- `@github-reader/github`: GitHub GraphQL and Worker `DiscussionProvider`.
+- `@github-reader/github`: Worker-backed GitHub GraphQL and `DiscussionProvider`.
 - `@github-reader/vitepress`: VitePress route/DOM `DocumentAdapter`.
 
 Keep generic packages independent of Vue, book content, product copy, and specific language codes.
@@ -69,7 +69,7 @@ Each canonical page/category pair maps to one GitHub Discussion. Languages on th
 - `Announcements`: readable legacy or publisher-created chapter threads.
 - `General`: newly created chapter threads.
 
-Reads use the Worker. Authenticated mutations go to GitHub GraphQL and then invalidate Worker caches. Module-level state must remain keyed by canonical document ID.
+Reads and authenticated mutations use the Worker. Successful mutations invalidate the matching page/category Durable Object without exposing a public purge endpoint. Module-level state must remain keyed by canonical document ID.
 
 ## Authentication and Worker
 
@@ -83,6 +83,16 @@ REPO_NAME
 DOCUMENT_PATH_PREFIX
 DISCUSSION_CATEGORIES
 ALLOWED_ORIGINS
+CACHE_FRESH_TTL
+CACHE_STALE_TTL
+RATE_LIMIT_RESERVE
+GRAPHQL_SECONDARY_BUDGET
+REST_SECONDARY_BUDGET
+OAUTH_SECONDARY_BUDGET
+CONTENT_MINUTE_BUDGET
+CONTENT_HOUR_BUDGET
+GITHUB_CONCURRENCY_LIMIT
+MUTATION_MIN_INTERVAL_MS
 ```
 
 Deploy one single-tenant Worker per book unless a separate multi-tenant authorization design is introduced.
@@ -93,7 +103,7 @@ User Markdown is rendered with `marked` and sanitized by DOMPurify. Do not bypas
 
 ## Tests
 
-- Vitest covers core protocols, anchoring, state races, provider mapping and Worker validation.
+- Vitest covers core protocols, anchoring, state races, provider mapping and Worker validation; the Cloudflare Vitest pool covers SQLite Durable Objects, caching and rate coordination in the Workers runtime.
 - Playwright uses mocked Discussion data and never mutates a real GitHub repository.
 - Browser coverage includes language discovery/switching, missing-language fallback, multilingual selection, annotation deep links, comments, reactions, mobile layout and accessibility.
 - `npm run check` does not include Playwright; run `npm run test:e2e` separately.

@@ -10,7 +10,6 @@ vi.mock('../docs/.vitepress/theme/composables/useGithubGql', () => ({
   createDiscussion: vi.fn(),
   deleteDiscussionComment: vi.fn(),
   findDiscussionWithComments: githubMocks.findDiscussionWithComments,
-  purgeWorkerCache: vi.fn(),
   updateDiscussionComment: vi.fn(),
 }))
 

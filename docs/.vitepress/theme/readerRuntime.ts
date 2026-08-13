@@ -28,8 +28,6 @@ export const githubDiscussionProvider = createGitHubDiscussionProvider(
     owner: readerConfig.github.owner,
     repo: readerConfig.github.repo,
     workerUrl: readerConfig.github.workerUrl,
-    graphqlUrl: readerConfig.github.graphqlUrl,
-    development: import.meta.env.DEV,
   },
   {
     getToken() {

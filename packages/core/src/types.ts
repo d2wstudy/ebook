@@ -34,10 +34,11 @@ export interface DiscussionThreadResult {
   comments: ThreadComment[]
 }
 
-export interface ReactionDelta {
-  subjectId: string
-  content: string
-  delta: number
+export interface DiscussionMutationContext {
+  documentId: string
+  categoryName: string
+  discussionId?: string | null
+  dropCache?: boolean
 }
 
 export interface DiscussionProvider {
@@ -47,21 +48,13 @@ export interface DiscussionProvider {
     knownDiscussionId?: string | null,
     force?: boolean,
   ): Promise<DiscussionThreadResult>
-  purgeCache(
-    documentId: string,
-    categoryName: string,
-    userOnly?: boolean,
-    reactionDelta?: ReactionDelta,
-    knownDiscussionId?: string | null,
-  ): Promise<boolean>
   createDiscussion(documentId: string, categoryName: string, bodyText: string): Promise<DiscussionMeta>
-  addComment(discussionId: string, body: string): Promise<ThreadComment>
-  addReply(discussionId: string, replyToId: string, body: string): Promise<ThreadReply>
-  updateComment(commentId: string, body: string): Promise<ThreadEntry>
-  deleteComment(commentId: string): Promise<void>
-  addReaction(subjectId: string, content: string): Promise<void>
-  removeReaction(subjectId: string, content: string): Promise<void>
-  getCategoryId(categoryName: string): Promise<string | null>
+  addComment(context: DiscussionMutationContext, body: string): Promise<ThreadComment>
+  addReply(context: DiscussionMutationContext, replyToId: string, body: string): Promise<ThreadReply>
+  updateComment(context: DiscussionMutationContext, commentId: string, body: string): Promise<ThreadEntry>
+  deleteComment(context: DiscussionMutationContext, commentId: string): Promise<void>
+  addReaction(context: DiscussionMutationContext, subjectId: string, content: string): Promise<void>
+  removeReaction(context: DiscussionMutationContext, subjectId: string, content: string): Promise<void>
 }
 
 export interface AnnotationAnchor<TLanguage extends string = string> {
@@ -131,7 +124,6 @@ export interface ReaderGitHubConfig {
   owner: string
   repo: string
   workerUrl: string
-  graphqlUrl?: string
   oauthClientId?: string
   oauthScope?: string
 }

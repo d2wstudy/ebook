@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url'
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const workerDir = resolve(rootDir, 'worker')
 const bookConfigPath = resolve(rootDir, 'book.config.ts')
-const wranglerConfigPath = resolve(workerDir, 'wrangler.toml')
+const wranglerConfigPath = resolve(workerDir, 'wrangler.jsonc')
 const localEnvPath = resolve(rootDir, 'docs', '.env.development.local')
 const setupDir = resolve(rootDir, '.setup')
 const statePath = join(setupDir, 'state.json')
@@ -200,10 +200,16 @@ function readQuotedProperty(source, property, fallback = '') {
   return match?.[1] || fallback
 }
 
-function readTomlProperty(source, property, fallback = '') {
-  const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const match = source.match(new RegExp(`^${escaped}\\s*=\\s*"([^"]*)"`, 'm'))
-  return match?.[1] || fallback
+function parseWranglerConfig(source) {
+  return JSON.parse(source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, ''))
+}
+
+function readWranglerProperty(source, property, fallback = '') {
+  const config = parseWranglerConfig(source)
+  const value = property === 'name' ? config.name : config.vars?.[property]
+  return typeof value === 'string' ? value : fallback
 }
 
 function escapeSingleQuoted(value) {
@@ -216,10 +222,12 @@ function replaceQuotedProperty(source, property, value) {
   return source.replace(pattern, (_, prefix) => `${prefix}'${escapeSingleQuoted(value)}'`)
 }
 
-function replaceTomlProperty(source, property, value) {
+function replaceWranglerProperty(source, property, value) {
   const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const pattern = new RegExp(`^(${escaped}\\s*=\\s*)"[^"]*"`, 'm')
-  if (!pattern.test(source)) throw new Error(`无法在 worker/wrangler.toml 中找到 ${property} 配置。`)
+  const pattern = property === 'name'
+    ? new RegExp(`("name"\\s*:\\s*)"[^"]*"`)
+    : new RegExp(`("${escaped}"\\s*:\\s*)"[^"]*"`)
+  if (!pattern.test(source)) throw new Error(`无法在 worker/wrangler.jsonc 中找到 ${property} 配置。`)
   return source.replace(pattern, (_, prefix) => `${prefix}"${String(value).replaceAll('"', '\\"')}"`)
 }
 
@@ -250,16 +258,16 @@ function inferRepository() {
 function readProjectConfig() {
   const bookConfig = readFileSync(bookConfigPath, 'utf8')
   const wranglerConfig = readFileSync(wranglerConfigPath, 'utf8')
-  const origins = readTomlProperty(wranglerConfig, 'ALLOWED_ORIGINS', '')
+  const origins = readWranglerProperty(wranglerConfig, 'ALLOWED_ORIGINS', '')
   return {
     owner: readQuotedProperty(bookConfig, 'owner'),
     repo: readQuotedProperty(bookConfig, 'repo'),
     base: normalizeBase(readQuotedProperty(bookConfig, 'base', '/')),
     workerUrl: readQuotedProperty(bookConfig, 'workerUrl'),
-    workerName: readTomlProperty(wranglerConfig, 'name'),
-    workerOwner: readTomlProperty(wranglerConfig, 'REPO_OWNER'),
-    workerRepo: readTomlProperty(wranglerConfig, 'REPO_NAME'),
-    workerBase: normalizeBase(readTomlProperty(wranglerConfig, 'DOCUMENT_PATH_PREFIX', '/')),
+    workerName: readWranglerProperty(wranglerConfig, 'name'),
+    workerOwner: readWranglerProperty(wranglerConfig, 'REPO_OWNER'),
+    workerRepo: readWranglerProperty(wranglerConfig, 'REPO_NAME'),
+    workerBase: normalizeBase(readWranglerProperty(wranglerConfig, 'DOCUMENT_PATH_PREFIX', '/')),
     pagesOrigin: normalizeOrigin(origins.split(',').find((item) => item.trim().startsWith('https://')) || ''),
   }
 }
@@ -332,7 +340,7 @@ function githubGraphqlJson(query, variables = {}, jq = '.') {
 
 function requiredDiscussionCategories() {
   const config = readFileSync(wranglerConfigPath, 'utf8')
-  return readTomlProperty(config, 'DISCUSSION_CATEGORIES', 'Ideas,Announcements,General')
+  return readWranglerProperty(config, 'DISCUSSION_CATEGORIES', 'Ideas,Announcements,General')
     .split(',')
     .map((name) => name.trim())
     .filter(Boolean)
@@ -427,11 +435,11 @@ function updateBookConfig({ owner, repo, base, workerUrl }) {
 
 function updateWorkerConfig({ owner, repo, base, pagesOrigin, workerName }) {
   let source = readFileSync(wranglerConfigPath, 'utf8')
-  source = replaceTomlProperty(source, 'name', workerName)
-  source = replaceTomlProperty(source, 'REPO_OWNER', owner)
-  source = replaceTomlProperty(source, 'REPO_NAME', repo)
-  source = replaceTomlProperty(source, 'DOCUMENT_PATH_PREFIX', base)
-  source = replaceTomlProperty(source, 'ALLOWED_ORIGINS', `${pagesOrigin},http://localhost:15689,http://127.0.0.1:15689`)
+  source = replaceWranglerProperty(source, 'name', workerName)
+  source = replaceWranglerProperty(source, 'REPO_OWNER', owner)
+  source = replaceWranglerProperty(source, 'REPO_NAME', repo)
+  source = replaceWranglerProperty(source, 'DOCUMENT_PATH_PREFIX', base)
+  source = replaceWranglerProperty(source, 'ALLOWED_ORIGINS', `${pagesOrigin},http://localhost:15689,http://127.0.0.1:15689`)
   atomicWrite(wranglerConfigPath, source)
 }
 
@@ -503,7 +511,7 @@ function createBackup(previous, target) {
   mkdirSync(backupPath, { recursive: true })
   const files = [
     ['book.config.ts', bookConfigPath],
-    ['worker.wrangler.toml', wranglerConfigPath],
+    ['worker.wrangler.jsonc', wranglerConfigPath],
   ]
   for (const [name, filePath] of files) copyFileSync(filePath, join(backupPath, name))
   const localEnvExists = existsSync(localEnvPath)
@@ -625,6 +633,7 @@ async function applySetup(state, options, runtime = {}) {
 
   if (!state.completed.workerConfig) {
     updateWorkerConfig(state.target)
+    commandResult(npmCommand, ['run', 'generate:worker-documents'])
     saveCompletion(state, 'workerConfig')
   }
 
@@ -717,7 +726,7 @@ async function rollback() {
   if (!await confirm('恢复本地配置并重新部署旧 Worker 配置？', false)) return
 
   restoreFile(join(backupPath, 'book.config.ts'), bookConfigPath)
-  restoreFile(join(backupPath, 'worker.wrangler.toml'), wranglerConfigPath)
+  restoreFile(join(backupPath, 'worker.wrangler.jsonc'), wranglerConfigPath)
   restoreFile(join(backupPath, 'docs.env.development.local'), localEnvPath, metadata.localEnvExists)
 
   const state = createState(previous, metadata.options || {}, previous)
@@ -726,6 +735,7 @@ async function rollback() {
   writeState(state)
   ensureCloudflareLogin(state)
   updateWorkerConfig(previous)
+  commandResult(npmCommand, ['run', 'generate:worker-documents'])
   saveCompletion(state, 'workerConfig')
   state.workerUrl = deployWorker()
   saveCompletion(state, 'workerDeployment')
@@ -754,7 +764,7 @@ async function doctor() {
   console.log(`Worker URL：${config.workerUrl || '(未配置)'}`)
   console.log(`状态文件：${state ? `${state.completed.verification ? '已完成' : '未完成'} (${statePath})` : '不存在'}`)
 
-  if (config.base !== config.workerBase) issues.push('book.config.ts 与 wrangler.toml 的 base 不一致')
+  if (config.base !== config.workerBase) issues.push('book.config.ts 与 wrangler.jsonc 的 base 不一致')
   if (!config.workerUrl || config.workerUrl.includes('.invalid')) issues.push('Worker URL 尚未配置')
   const cloudflare = runWrangler(['whoami'], { capture: true, allowFailure: true })
   if (cloudflare.status !== 0) issues.push('Cloudflare CLI 未登录')
@@ -870,8 +880,8 @@ async function setup() {
   try {
     await applySetup(state, state.options, { skipVerification: args.has('--skip-verification') })
     console.log('\n配置、远端同步和验证全部完成。')
-    if (state.options.pushChanges && gitFilesChanged(['book.config.ts', 'worker/wrangler.toml'])) {
-      commandResult('git', ['add', '--', 'book.config.ts', 'worker/wrangler.toml'])
+    if (state.options.pushChanges && gitFilesChanged(['book.config.ts', 'worker/wrangler.jsonc'])) {
+      commandResult('git', ['add', '--', 'book.config.ts', 'worker/wrangler.jsonc'])
       commandResult('git', ['commit', '-m', 'configure ebook deployment'])
       const branch = commandResult('git', ['branch', '--show-current'], { capture: true, printOutput: false }).output.trim()
       commandResult('git', ['push', 'origin', branch || 'main'])

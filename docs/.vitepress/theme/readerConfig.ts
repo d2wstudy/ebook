@@ -22,7 +22,6 @@ export const readerConfig = defineReaderConfig({
     workerUrl: (
       import.meta.env.VITE_WORKER_URL || bookConfig.github.workerUrl
     ).replace(/\/+$/, ''),
-    graphqlUrl: 'https://api.github.com/graphql',
     oauthClientId: import.meta.env.VITE_GITHUB_CLIENT_ID || '',
     oauthScope: 'public_repo',
   },

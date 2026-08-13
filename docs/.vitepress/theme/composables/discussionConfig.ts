@@ -10,7 +10,6 @@ import { readerConfig, type ReaderLanguage } from '../readerConfig'
 export const REPO_OWNER = readerConfig.github.owner
 export const REPO_NAME = readerConfig.github.repo
 export const REPO_URL = `https://github.com/${REPO_OWNER}/${REPO_NAME}`
-export const GRAPHQL_URL = readerConfig.github.graphqlUrl
 export const WORKER_URL = readerConfig.github.workerUrl
 
 export const ANNOTATION_CATEGORY = readerConfig.discussions.annotationCategory

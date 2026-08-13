@@ -16,7 +16,8 @@ import {
   createDiscussion,
   deleteDiscussionComment,
   findDiscussionWithComments,
-  purgeWorkerCache,
+  mutationContext,
+  mutationContextFromDocumentId,
   updateDiscussionComment,
 } from './useGithubGql'
 import { createReactionToggler } from './useDiscussionThread'
@@ -146,11 +147,11 @@ export function useComments() {
 
     try {
       const meta = await ensureDiscussion(routePath)
-      const newComment = await addDiscussionComment(meta.id, body)
+      const context = mutationContext(routePath, meta.category, meta.id)
+      const newComment = await addDiscussionComment(context, body)
       if (currentDocumentId === documentId) {
         comments.value = [...comments.value, mapComment(newComment)]
       }
-      await purgeWorkerCache(routePath, meta.category, false, undefined, meta.id)
     } catch (cause) {
       error.value = messageFromError(cause, '发表评论失败。')
       throw cause
@@ -164,12 +165,12 @@ export function useComments() {
 
     try {
       const meta = await ensureDiscussion(routePath)
-      const newReply = await addDiscussionReply(meta.id, commentId, body)
+      const context = mutationContext(routePath, meta.category, meta.id)
+      const newReply = await addDiscussionReply(context, commentId, body)
       if (currentDocumentId === documentId) {
         const parent = comments.value.find(comment => comment.id === commentId)
         if (parent) parent.replies = [...parent.replies, mapGitHubReply(newReply)]
       }
-      await purgeWorkerCache(routePath, meta.category, false, undefined, meta.id)
     } catch (cause) {
       error.value = messageFromError(cause, '发表回复失败。')
       throw cause
@@ -180,10 +181,13 @@ export function useComments() {
     error.value = null
     const documentId = readerDocument.getDocumentId(routePath)
     try {
-      const updated = await updateDiscussionComment(subjectId, body)
-      if (currentDocumentId === documentId) updateLocalComment(subjectId, updated)
       const meta = await ensureDiscussion(routePath)
-      await purgeWorkerCache(routePath, meta.category, false, undefined, meta.id)
+      const updated = await updateDiscussionComment(
+        mutationContext(routePath, meta.category, meta.id),
+        subjectId,
+        body,
+      )
+      if (currentDocumentId === documentId) updateLocalComment(subjectId, updated)
     } catch (cause) {
       error.value = messageFromError(cause, '更新内容失败。')
       throw cause
@@ -194,7 +198,8 @@ export function useComments() {
     error.value = null
     const documentId = readerDocument.getDocumentId(routePath)
     try {
-      await deleteDiscussionComment(subjectId)
+      const meta = await ensureDiscussion(routePath)
+      await deleteDiscussionComment(mutationContext(routePath, meta.category, meta.id), subjectId)
       if (currentDocumentId === documentId) {
         const topLevelIndex = comments.value.findIndex(comment => comment.id === subjectId)
         if (topLevelIndex >= 0) {
@@ -208,8 +213,6 @@ export function useComments() {
           }
         }
       }
-      const meta = await ensureDiscussion(routePath)
-      await purgeWorkerCache(routePath, meta.category, false, undefined, meta.id)
     } catch (cause) {
       error.value = messageFromError(cause, '删除内容失败。')
       throw cause
@@ -223,7 +226,9 @@ export function useComments() {
       if (reply) return reply
     }
     return null
-  })
+  }, () => discussion.value && currentDocumentId
+    ? mutationContextFromDocumentId(currentDocumentId, discussion.value.category, discussion.value.id)
+    : null)
 
   function clearError() {
     error.value = null

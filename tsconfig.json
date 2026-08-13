@@ -25,6 +25,7 @@
     "playwright.config.ts"
   ],
   "exclude": [
+    "tests/worker-runtime.test.ts",
     "docs/.vitepress/cache",
     "docs/.vitepress/dist",
     "node_modules"

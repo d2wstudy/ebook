@@ -8,32 +8,37 @@
   ],
   "scripts": {
     "dev": "vitepress dev docs --port 15689",
-    "build": "vitepress build docs",
+    "build": "npm run generate:worker-documents && vitepress build docs",
     "preview": "vitepress preview docs",
     "setup": "node scripts/setup.mjs",
-    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json && tsc --noEmit -p worker/tsconfig.json && tsc --noEmit -p tests/tsconfig.worker.json",
     "test": "vitest run",
+    "test:worker": "vitest run --config vitest.worker.config.ts",
     "test:e2e": "playwright test",
     "setup:doctor": "node scripts/setup.mjs --doctor",
     "setup:rollback": "node scripts/setup.mjs --rollback",
     "setup:cleanup": "node scripts/setup.mjs --cleanup",
-    "check:worker": "node --check worker/index.js",
+    "generate:worker-documents": "node scripts/generate-worker-documents.mjs",
+    "check:worker-types": "wrangler types --check worker/worker-configuration.d.ts --config worker/wrangler.jsonc",
+    "check:worker": "npm run generate:worker-documents && npm run check:worker-types && wrangler deploy --dry-run --config worker/wrangler.jsonc --outdir .wrangler-dry-run",
     "check:setup": "node --check scripts/setup.mjs",
-    "check": "npm run typecheck && npm run test && npm run check:worker && npm run check:setup && npm run build"
+    "check": "npm run typecheck && npm run test && npm run test:worker && npm run check:worker && npm run check:setup && npm run build"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
+    "@cloudflare/vitest-pool-workers": "^0.21.2",
     "@playwright/test": "^1.62.1",
     "@types/markdown-it-container": "^4.0.0",
     "happy-dom": "^20.11.1",
     "markdown-it-container": "^4.0.0",
     "markdown-it-mathjax3": "^4.3.2",
-    "yaml": "^2.8.1",
     "typescript": "^5.9.3",
     "vitepress": "^1.6.3",
     "vitest": "^4.1.10",
     "vue": "^3.5.13",
-    "vue-tsc": "^3.3.9"
+    "vue-tsc": "^3.3.9",
+    "wrangler": "^4.122.0",
+    "yaml": "^2.8.1"
   },
   "dependencies": {
     "@github-reader/core": "file:packages/core",

@@ -1,5 +1,6 @@
 import {
   createOptimisticReactionToggler,
+  type DiscussionMutationContext,
   type ReactionGroup,
   type ThreadReply,
 } from '@github-reader/core'
@@ -14,14 +15,17 @@ export const mapReply = mapGitHubReply
 /** Vue/auth bridge around the provider-independent optimistic reaction reducer. */
 export function createReactionToggler(
   findTarget: (subjectId: string) => { reactions: ReactionGroup[] } | null,
+  getContext: () => DiscussionMutationContext | null,
 ) {
   const { token } = useAuth()
   const toggle = createOptimisticReactionToggler(
     findTarget,
     async (subjectId, content, add) => {
       if (!token.value) throw new Error('请先登录 GitHub。')
-      if (add) await addReaction(subjectId, content)
-      else await removeReaction(subjectId, content)
+      const context = getContext()
+      if (!context) throw new Error('当前 GitHub Discussion 尚未准备完成。')
+      if (add) await addReaction(context, subjectId, content)
+      else await removeReaction(context, subjectId, content)
     },
   )
 

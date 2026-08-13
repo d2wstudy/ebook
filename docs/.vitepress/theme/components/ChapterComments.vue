@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vitepress'
 import { useAuth } from '../composables/useAuth'
 import { useComments } from '../composables/useComments'
-import { purgeWorkerCache } from '../composables/useGithubGql'
 import MarkdownEditor from './MarkdownEditor.vue'
 import CommentItem from './CommentItem.vue'
 
@@ -68,15 +67,7 @@ async function onReply(commentId: string, body: string) {
 }
 
 async function onReact(subjectId: string, content: string) {
-  const result = await toggleReaction(subjectId, content)
-  if (!result || !discussion.value) return
-  await purgeWorkerCache(
-    route.path,
-    discussion.value.category,
-    true,
-    { subjectId, content, delta: result.delta },
-    discussion.value.id,
-  )
+  await toggleReaction(subjectId, content)
 }
 
 async function onEdit(subjectId: string, body: string) {

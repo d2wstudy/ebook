@@ -1,61 +1,91 @@
 import { describe, expect, it } from 'vitest'
-// The Worker is intentionally plain JavaScript because Cloudflare executes it directly.
-// @ts-expect-error no separate declaration file is needed for these test-only exports
-import { getWorkerConfig, validateDiscussionParams, validateReactionMutation } from '../worker/index.js'
+import { isAllowedGraphQlOperation } from '../worker/src/graphql-allowlist'
+import {
+  defaultAllowedDocumentIds,
+  validateDiscussionParams,
+} from '../worker/src/validation'
 
 function workerUrl(params: Record<string, string>) {
-  const url = new URL('https://worker.example/api/cache/purge')
+  const url = new URL('https://worker.example/api/discussions')
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value))
   return url
 }
 
 describe('Worker request validation', () => {
-  it('accepts canonical project pages and rejects unrelated paths', () => {
+  it('accepts generated project pages and rejects unrelated or unknown paths', () => {
     expect(validateDiscussionParams(workerUrl({
-      path: '/reader-template/chapters/01-introduction.html',
+      path: '/ebook/chapters/01-introduction.html',
       category: 'Ideas',
-    })).error).toBeUndefined()
+    }), {
+      documentPathPrefix: '/ebook/',
+      allowedCategories: new Set(['Ideas', 'Announcements', 'General']),
+      allowedDocumentIds: defaultAllowedDocumentIds(),
+    })).toMatchObject({
+      pagePath: '/ebook/chapters/01-introduction.html',
+      categoryName: 'Ideas',
+    })
 
     expect(validateDiscussionParams(workerUrl({
       path: '/another-project/page.html',
       category: 'Ideas',
-    })).error).toBe('Invalid path')
+    }), {
+      documentPathPrefix: '/ebook/',
+      allowedCategories: new Set(['Ideas']),
+      allowedDocumentIds: defaultAllowedDocumentIds(),
+    })).toMatchObject({ error: 'Invalid path', status: 400 })
+
+    expect(validateDiscussionParams(workerUrl({
+      path: '/ebook/chapters/not-built.html',
+      category: 'Ideas',
+    }), {
+      documentPathPrefix: '/ebook/',
+      allowedCategories: new Set(['Ideas']),
+      allowedDocumentIds: defaultAllowedDocumentIds(),
+    })).toMatchObject({ error: 'Unknown document', status: 404 })
   })
 
-  it('supports a deployment-defined repository namespace and category set', () => {
-    const env = {
-      REPO_OWNER: 'publisher',
-      REPO_NAME: 'another-book',
-      DOCUMENT_PATH_PREFIX: '/another-book',
-      DISCUSSION_CATEGORIES: 'Annotations,General',
-    }
-
-    expect(getWorkerConfig(env)).toMatchObject({
-      repoOwner: 'publisher',
-      repoName: 'another-book',
-      documentPathPrefix: '/another-book/',
-    })
+  it('does not weaken the generated document whitelist for another deployment prefix', () => {
     expect(validateDiscussionParams(workerUrl({
       path: '/another-book/chapter.html',
       category: 'Annotations',
-    }), env).error).toBeUndefined()
-    expect(validateDiscussionParams(workerUrl({
-      path: '/another-book/chapter.html',
-      category: 'Notes',
-    }), env).error).toBe('Invalid category')
+    }), {
+      documentPathPrefix: '/another-book/',
+      allowedCategories: new Set(['Annotations', 'General']),
+      allowedDocumentIds: defaultAllowedDocumentIds(),
+    })).toMatchObject({ error: 'Unknown document', status: 404 })
   })
 
-  it('accepts every GitHub reaction but rejects forged deltas', () => {
-    expect(validateReactionMutation(workerUrl({
-      subject_id: 'DC_kwDOROV32M4A8MOm',
-      reaction: 'CONFUSED',
-      delta: '1',
-    })).active).toBe(true)
+  it('rejects invalid categories and untrusted known IDs', () => {
+    const config = {
+      documentPathPrefix: '/ebook/',
+      allowedCategories: new Set(['Ideas', 'Announcements', 'General']),
+      allowedDocumentIds: defaultAllowedDocumentIds(),
+    }
+    expect(validateDiscussionParams(workerUrl({
+      path: '/ebook/index.html',
+      category: 'Notes',
+    }), config)).toMatchObject({ error: 'Invalid category', status: 400 })
 
-    expect(validateReactionMutation(workerUrl({
-      subject_id: 'DC_kwDOROV32M4A8MOm',
-      reaction: 'CONFUSED',
-      delta: '999',
-    })).error).toBe('Invalid reaction delta')
+    expect(validateDiscussionParams(workerUrl({
+      path: '/ebook/index.html',
+      category: 'Ideas',
+      id: 'bad\nvalue',
+    }), config)).toMatchObject({ error: 'Invalid discussion id', status: 400 })
+  })
+})
+
+describe('Worker GraphQL allowlist', () => {
+  it('allows repository metadata and supported discussion mutations only', () => {
+    expect(isAllowedGraphQlOperation(`query($owner: String!, $name: String!) {
+      repository(owner: $owner, name: $name) {
+        id
+        discussionCategories(first: 50) { nodes { id name } }
+      }
+    }`)).toBe(true)
+    expect(isAllowedGraphQlOperation(`mutation($subjectId: ID!) {
+      addReaction(input: { subjectId: $subjectId, content: HEART }) { reaction { content } }
+    }`)).toBe(true)
+    expect(isAllowedGraphQlOperation('query { viewer { login } }')).toBe(false)
+    expect(isAllowedGraphQlOperation('query { rateLimit { remaining } }')).toBe(false)
   })
 })

@@ -18,7 +18,8 @@ import {
   createDiscussion,
   deleteDiscussionComment,
   findDiscussionWithComments,
-  purgeWorkerCache,
+  mutationContext,
+  mutationContextFromDocumentId,
   updateDiscussionComment,
 } from './useGithubGql'
 import { createReactionToggler, mapReply } from './useDiscussionThread'
@@ -149,7 +150,10 @@ export function useAnnotations() {
     try {
       const meta = await ensureDiscussion(routePath)
       const body = encodeAnnotationBody({ documentId, anchor, note, segments })
-      const newComment = await addDiscussionComment(meta.id, body)
+      const newComment = await addDiscussionComment(
+        mutationContext(routePath, meta.category, meta.id),
+        body,
+      )
       const thread = buildThread(newComment, anchor, note, segments)
 
       if (currentDocumentId === documentId) {
@@ -157,7 +161,6 @@ export function useAnnotations() {
         indexThread(map, thread)
         annotations.value = map
       }
-      await purgeWorkerCache(routePath, meta.category, false, undefined, meta.id)
     } catch (cause) {
       error.value = messageFromError(cause, '添加笔记失败。')
       throw cause
@@ -171,12 +174,15 @@ export function useAnnotations() {
 
     try {
       const meta = await ensureDiscussion(routePath)
-      const newReply = await addDiscussionReply(meta.id, threadId, body)
+      const newReply = await addDiscussionReply(
+        mutationContext(routePath, meta.category, meta.id),
+        threadId,
+        body,
+      )
       if (currentDocumentId === documentId) {
         const parent = findThread(threadId)
         if (parent) parent.replies = [...parent.replies, mapReply(newReply)]
       }
-      await purgeWorkerCache(routePath, meta.category, false, undefined, meta.id)
     } catch (cause) {
       error.value = messageFromError(cause, '发表回复失败。')
       throw cause
@@ -196,7 +202,12 @@ export function useAnnotations() {
             segments: thread.segments,
           })
         : body
-      const updated = await updateDiscussionComment(subjectId, apiBody)
+      const meta = await ensureDiscussion(routePath)
+      const updated = await updateDiscussionComment(
+        mutationContext(routePath, meta.category, meta.id),
+        subjectId,
+        apiBody,
+      )
 
       if (thread && currentDocumentId === documentId) {
         thread.note = body
@@ -209,8 +220,6 @@ export function useAnnotations() {
         }
       }
 
-      const meta = await ensureDiscussion(routePath)
-      await purgeWorkerCache(routePath, meta.category, false, undefined, meta.id)
     } catch (cause) {
       error.value = messageFromError(cause, '更新笔记失败。')
       throw cause
@@ -221,7 +230,8 @@ export function useAnnotations() {
     error.value = null
     const documentId = readerDocument.getDocumentId(routePath)
     try {
-      await deleteDiscussionComment(subjectId)
+      const meta = await ensureDiscussion(routePath)
+      await deleteDiscussionComment(mutationContext(routePath, meta.category, meta.id), subjectId)
 
       if (currentDocumentId !== documentId) {
         // The GitHub mutation succeeded, but the reader has navigated away.
@@ -240,8 +250,6 @@ export function useAnnotations() {
         }
       }
 
-      const meta = await ensureDiscussion(routePath)
-      await purgeWorkerCache(routePath, meta.category, false, undefined, meta.id)
     } catch (cause) {
       error.value = messageFromError(cause, '删除笔记失败。')
       throw cause
@@ -251,7 +259,9 @@ export function useAnnotations() {
   const toggleReaction = createReactionToggler((subjectId) => {
     const thread = findThread(subjectId)
     return thread || findReply(subjectId)
-  })
+  }, () => discussion.value && currentDocumentId
+    ? mutationContextFromDocumentId(currentDocumentId, discussion.value.category, discussion.value.id)
+    : null)
 
   function clearError() {
     error.value = null

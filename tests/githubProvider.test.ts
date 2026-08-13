@@ -46,12 +46,36 @@ describe('GitHub Discussion provider', () => {
     })
   })
 
+  it('sends force refresh through the Worker instead of bypassing it', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      expect(url.pathname).toBe('/api/discussions')
+      expect(url.searchParams.get('force')).toBe('1')
+      return Response.json({ discussion: null, comments: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const provider = createGitHubDiscussionProvider({
+      owner: 'owner',
+      repo: 'repo',
+      workerUrl: 'https://reader-worker.example',
+    }, { getToken: () => 'token', invalidate: vi.fn() })
+
+    await provider.findDiscussion('/book/chapter.html', 'Notes', null, true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('uses deployment configuration when creating a Discussion', async () => {
-    const requests: Array<{ query: string; variables: Record<string, unknown> }> = []
+    const requests: Array<{
+      query: string
+      variables: Record<string, unknown>
+      cache?: Record<string, unknown>
+    }> = []
     vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       const request = JSON.parse(String(init?.body)) as {
         query: string
         variables: Record<string, unknown>
+        cache?: Record<string, unknown>
       }
       requests.push(request)
 
@@ -79,7 +103,6 @@ describe('GitHub Discussion provider', () => {
       owner: 'another-owner',
       repo: 'another-book',
       workerUrl: 'https://reader-worker.example',
-      graphqlUrl: 'https://graphql.example',
     }, { getToken: () => 'token', invalidate: vi.fn() })
 
     await provider.createDiscussion('/another-book/chapter.html', 'Notes', 'Reader notes')
@@ -90,6 +113,11 @@ describe('GitHub Discussion provider', () => {
       categoryId: 'CAT1',
       title: '/another-book/chapter.html',
       body: 'Reader notes',
+    })
+    expect(requests[1].cache).toEqual({
+      documentId: '/another-book/chapter.html',
+      categoryName: 'Notes',
+      dropCache: true,
     })
   })
 })

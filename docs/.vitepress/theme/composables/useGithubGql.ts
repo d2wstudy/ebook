@@ -1,7 +1,7 @@
 import type {
   DiscussionMeta,
+  DiscussionMutationContext,
   DiscussionThreadResult,
-  ReactionDelta,
   ThreadComment,
   ThreadEntry,
   ThreadReply,
@@ -26,20 +26,28 @@ export async function findDiscussionWithComments(
   )
 }
 
-export async function purgeWorkerCache(
+export function mutationContext(
   routePath: string,
   categoryName: string,
-  userOnly = false,
-  reactionDelta?: ReactionDelta,
   knownDiscussionId?: string | null,
-): Promise<boolean> {
-  return githubDiscussionProvider.purgeCache(
+): DiscussionMutationContext {
+  return mutationContextFromDocumentId(
     readerDocument.getDocumentId(routePath),
     categoryName,
-    userOnly,
-    reactionDelta,
     knownDiscussionId,
   )
+}
+
+export function mutationContextFromDocumentId(
+  documentId: string,
+  categoryName: string,
+  knownDiscussionId?: string | null,
+): DiscussionMutationContext {
+  return {
+    documentId,
+    categoryName,
+    discussionId: knownDiscussionId,
+  }
 }
 
 export async function createDiscussion(
@@ -54,38 +62,42 @@ export async function createDiscussion(
   )
 }
 
-export function addDiscussionComment(discussionId: string, body: string): Promise<ThreadComment> {
-  return githubDiscussionProvider.addComment(discussionId, body)
+export function addDiscussionComment(context: DiscussionMutationContext, body: string): Promise<ThreadComment> {
+  return githubDiscussionProvider.addComment(context, body)
 }
 
 export function addDiscussionReply(
-  discussionId: string,
+  context: DiscussionMutationContext,
   replyToId: string,
   body: string,
 ): Promise<ThreadReply> {
-  return githubDiscussionProvider.addReply(discussionId, replyToId, body)
+  return githubDiscussionProvider.addReply(context, replyToId, body)
 }
 
-export function updateDiscussionComment(commentId: string, body: string): Promise<ThreadEntry> {
-  return githubDiscussionProvider.updateComment(commentId, body)
+export function updateDiscussionComment(
+  context: DiscussionMutationContext,
+  commentId: string,
+  body: string,
+): Promise<ThreadEntry> {
+  return githubDiscussionProvider.updateComment(context, commentId, body)
 }
 
-export function deleteDiscussionComment(commentId: string): Promise<void> {
-  return githubDiscussionProvider.deleteComment(commentId)
+export function deleteDiscussionComment(context: DiscussionMutationContext, commentId: string): Promise<void> {
+  return githubDiscussionProvider.deleteComment(context, commentId)
 }
 
-export function addReaction(subjectId: string, content: string): Promise<void> {
-  return githubDiscussionProvider.addReaction(subjectId, content)
+export function addReaction(
+  context: DiscussionMutationContext,
+  subjectId: string,
+  content: string,
+): Promise<void> {
+  return githubDiscussionProvider.addReaction(context, subjectId, content)
 }
 
-export function removeReaction(subjectId: string, content: string): Promise<void> {
-  return githubDiscussionProvider.removeReaction(subjectId, content)
-}
-
-export function getCategoryId(categoryName: string): Promise<string | null> {
-  return githubDiscussionProvider.getCategoryId(categoryName)
-}
-
-export function gql(query: string, variables: Record<string, unknown>) {
-  return githubDiscussionProvider.gql(query, variables)
+export function removeReaction(
+  context: DiscussionMutationContext,
+  subjectId: string,
+  content: string,
+): Promise<void> {
+  return githubDiscussionProvider.removeReaction(context, subjectId, content)
 }

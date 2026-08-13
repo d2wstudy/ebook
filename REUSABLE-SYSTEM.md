@@ -14,7 +14,10 @@ book.config.ts + content/<language>/chapters/*.md
        -> @github-reader/github
        -> @github-reader/vitepress
   -> Cloudflare Worker
-       -> GitHub OAuth / GraphQL / Discussions / cache
+       -> 精确页面白名单
+       -> DiscussionCache SQLite Durable Object（每页面/分类）
+       -> RateLimitCoordinator SQLite Durable Object
+       -> GitHub OAuth / GraphQL / REST
 ```
 
 语言由 `content/` 的一级目录自动发现。不同语言中 slug 相同的 Markdown 会生成同一个页面和 `documentId`，因此章节讨论不会随语言重复创建。
@@ -31,8 +34,8 @@ book.config.ts + content/<language>/chapters/*.md
 
 ### `@github-reader/github`
 
-- GitHub GraphQL mutation。
-- Worker discussion 读取与缓存失效协议。
+- 所有 GitHub GraphQL mutation 经 Worker 代理。
+- Worker discussion 读取、强制刷新与 mutation 缓存失效协议。
 - GitHub 数据到通用评论模型的映射。
 - 通过 `GitHubAuthBridge` 获取 token，不依赖 Vue。
 
@@ -96,16 +99,26 @@ slug: 01-introduction
 
 每本书独立部署一个 Worker，并固定：
 
-```toml
-[vars]
-REPO_OWNER = "publisher"
-REPO_NAME = "my-book"
-DOCUMENT_PATH_PREFIX = "/my-book/"
-DISCUSSION_CATEGORIES = "Notes,General"
-ALLOWED_ORIGINS = "https://publisher.github.io,http://localhost:15689"
+```jsonc
+{
+  "vars": {
+    "REPO_OWNER": "publisher",
+    "REPO_NAME": "my-book",
+    "DOCUMENT_PATH_PREFIX": "/my-book/",
+    "DISCUSSION_CATEGORIES": "Ideas,General",
+    "ALLOWED_ORIGINS": "https://publisher.github.io,http://localhost:15689"
+  }
+}
 ```
 
-Secrets 包括 OAuth client secret、匿名读取用 PAT 和可选缓存清理 key。浏览器请求不能动态指定仓库、分类白名单或允许 Origin。
+Secrets 包括 OAuth client secret 和匿名读取用 PAT。浏览器请求不能动态指定仓库、分类白名单或允许 Origin，也不存在公开缓存清理接口。
+
+Worker 的调用上限保护分为两层：
+
+- `DiscussionCache` 按 `documentId + category` 分片，SQLite 持久保存 fresh/stale 内容，并合并同一页面的并发冷请求。
+- `RateLimitCoordinator` 按 token 协调主配额；按仓库原子协调 GraphQL/REST secondary points、共享并发 lease、内容生成 60 秒/1 小时滚动预算及 mutative request 最小间隔；OAuth 使用独立滚动预算。GraphQL mutation 和 REST 写方法均按 5 points 计费。
+
+GitHub 限额或暂时故障时，仍在 stale TTL 内的共享 Discussion 可以继续返回；登录用户 Reaction overlay 若遇到 `429/5xx` 会降级为未标记 viewer reaction，`401` 仍会传递给前端使会话失效。
 
 ## 稳定身份
 
