@@ -124,6 +124,8 @@ npm run setup
 
 向导支持中断续跑、配置诊断、回滚和清理。完整前置条件、权限说明、手动配置与验证命令见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
 
+本仓库正式站点使用的 GitHub 登录 App 是 [`ebook-user-auth-509bc0`](https://github.com/apps/ebook-user-auth-509bc0)，所有者为 [`d2wstudy`](https://github.com/d2wstudy)。授权前请核对 GitHub 页面显示的信息一致；不一致时不要继续授权。
+
 ## 常用命令
 
 | 命令 | 说明 |

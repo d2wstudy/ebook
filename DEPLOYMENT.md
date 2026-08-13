@@ -261,7 +261,7 @@ npm run check
 
 ## 认证与可信边界
 
-- 只从正式站点进入 GitHub 登录，并确认授权页域名为 `github.com`、App 名称和所有者正确。
+- 只从正式站点进入 GitHub 登录，并确认授权页域名为 `github.com`、App 名称和所有者正确。本仓库正式站点当前使用 [`ebook-user-auth-509bc0`](https://github.com/apps/ebook-user-auth-509bc0)，所有者为 [`d2wstudy`](https://github.com/d2wstudy)；显示不一致时不要继续授权。
 - GitHub App user token 的有效能力是“用户自身权限”和“App 在目标仓库获批权限”的交集，并进一步限制到目标仓库。
 - 默认启用 expiring user token。Access token 通常约 8 小时，refresh token 通常约 6 个月；活跃会话会静默轮换。
 - 明文 access token 仅保存在当前页面内存。浏览器 `localStorage` 保存由 Worker 使用 AES-GCM 加密的 opaque session。
