@@ -28,6 +28,6 @@ export const bookConfig = {
   github: {
     owner: 'd2wstudy',
     repo: 'ebook',
-    workerUrl: 'https://example.invalid/reader-worker',
+    workerUrl: 'https://ebook-reader-worker.d2w.workers.dev',
   },
 } satisfies BookConfig
