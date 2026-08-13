@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Implementation guide for agents working in this repository. See `README.md` for setup and content authoring, and `REUSABLE-SYSTEM.md` for architecture boundaries.
+Implementation guide for agents working in this repository. See `README.md` for local setup and content authoring, `DEPLOYMENT.md` for GitHub/Worker deployment, and `REUSABLE-SYSTEM.md` for architecture boundaries.
 
 ## Project status
 
